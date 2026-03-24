@@ -1,5 +1,5 @@
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::{InitializeParams, InitializeResult, ServerCapabilities, ServerInfo};
+use tower_lsp::{LanguageServer, Server};
 
 #[derive(Debug)]
 struct LoomServer;
@@ -24,6 +24,10 @@ impl LanguageServer for LoomServer {
     }
 }
 
-fn main() {
-    println!("Hello from my Nix-powered CLI!");
+#[tokio::main]
+async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let (service, socket) = tower_lsp::LspService::new(|_client| LoomServer);
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
