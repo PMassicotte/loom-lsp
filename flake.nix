@@ -36,15 +36,24 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        cargoArtifacts = craneLib.buildDepsOnly { src = ./.; };
+        crateInfo = craneLib.crateNameFromCargoToml { cargoToml = ./crates/loom/Cargo.toml; };
+
+        commonArgs = {
+          src = ./.;
+          inherit (crateInfo) pname version;
+        };
+
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
       in
       {
         # 📦 Build your CLI
-        packages.default = craneLib.buildPackage {
-          src = ./.;
-          inherit cargoArtifacts;
-        };
+        packages.default = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+          }
+        );
 
         # ▶️ nix run
         apps.default = flake-utils.lib.mkApp {
