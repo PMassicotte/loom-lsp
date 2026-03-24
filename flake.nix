@@ -62,6 +62,10 @@
 
         # 🛠️ Dev shell
         devShells.default = pkgs.mkShell {
+          shellHook = ''
+            echo "  Welcome to the development shell for ${crateInfo.pname} ${crateInfo.version}!"
+            echo "󱄅 Run 'nix profile install .' to install loom."                                     
+          '';
           nativeBuildInputs = [ rustToolchain ];
         };
       }
