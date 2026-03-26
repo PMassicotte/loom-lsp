@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.50", features = ["full"] }
 tower-lsp = "0.20.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
