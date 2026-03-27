@@ -45,6 +45,14 @@ impl LanguageServer for LoomServer {
 
         self.documents.insert(uri, text);
     }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+
+        tracing::info!("Document closed: {}", uri);
+
+        self.documents.remove(&uri);
+    }
 }
 
 #[tokio::main]
