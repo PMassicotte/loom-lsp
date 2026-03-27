@@ -1,8 +1,8 @@
 use dashmap::DashMap;
 use std::sync::Arc;
 use tower_lsp::lsp_types::{
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, Server};
 
