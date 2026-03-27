@@ -1,0 +1,18 @@
+---
+source: crates/loom-parse/src/lib.rs
+expression: chunks
+---
+[
+    CodeChunk {
+        language: "r",
+        content: "x <- 1:10\ny <- x^2\nplot(x, y)",
+        start_line: 1,
+        end_line: 3,
+    },
+    CodeChunk {
+        language: "python",
+        content: "import matplotlib.pyplot as plt\nx = range(1, 11)\ny = [i**2 for i in x]\nplt.plot(x, y)\nplt.show()",
+        start_line: 6,
+        end_line: 10,
+    },
+]

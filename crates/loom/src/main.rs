@@ -13,6 +13,7 @@ use tower_lsp::{LanguageServer, Server};
 #[derive(Debug)]
 struct LoomServer {
     documents: Arc<DashMap<Url, String>>,
+    #[allow(dead_code)]
     config: Config,
 }
 

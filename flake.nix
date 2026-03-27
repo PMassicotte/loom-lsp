@@ -74,7 +74,10 @@
             echo "  nix profile install .  - Install loom"
             echo ""
           '';
-          nativeBuildInputs = [ rustToolchain ];
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.cargo-insta
+          ];
         };
       }
     );
