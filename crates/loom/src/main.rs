@@ -1,4 +1,8 @@
+use clap::Parser;
 use dashmap::DashMap;
+use loom_config::{Config, load_config, load_config_from};
+use std::path::PathBuf;
+
 use std::sync::Arc;
 use tower_lsp::lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
@@ -9,6 +13,7 @@ use tower_lsp::{LanguageServer, Server};
 #[derive(Debug)]
 struct LoomServer {
     documents: Arc<DashMap<Url, String>>,
+    config: Config,
 }
 
 #[tower_lsp::async_trait]
@@ -55,6 +60,15 @@ impl LanguageServer for LoomServer {
     }
 }
 
+#[derive(Parser)]
+struct Cli {
+    #[arg(long)]
+    stdio: bool,
+
+    #[arg(long)]
+    config: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_file = std::fs::File::create("/tmp/loom.log")?;
@@ -66,14 +80,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Starting loom language server");
 
+    let cli = Cli::parse();
+
     // Create the standard input and output streams for the LSP server.
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
+    // Load the configuration, either from the specified path or by discovering it automatically.
+    let config = if let Some(path) = cli.config {
+        load_config_from(&path)? // load from explicit path
+    } else {
+        load_config()? // discover automatically
+    };
+
     // Create the LSP service and the socket to listen for incoming messages.
-    let (service, socket) = tower_lsp::LspService::new(|_client| LoomServer {
+    let server = LoomServer {
         documents: Arc::new(DashMap::new()),
-    });
+        config,
+    };
+
+    let (service, socket) = tower_lsp::LspService::new(|_client| server);
 
     // Start the server and block until it finishes.
     Server::new(stdin, stdout, socket).serve(service).await;

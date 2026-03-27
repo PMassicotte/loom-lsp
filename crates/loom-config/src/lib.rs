@@ -38,6 +38,11 @@ fn parse_config(content: &str) -> Result<Config, ConfigError> {
     Ok(toml::from_str(content)?)
 }
 
+pub fn load_config_from(path: &std::path::Path) -> Result<Config, ConfigError> {
+    let content = std::fs::read_to_string(path)?;
+    parse_config(&content)
+}
+
 /// Load the configuration from the default locations.
 pub fn load_config() -> Result<Config, ConfigError> {
     // Define the paths to look for config files, in order of precedence. Start with the user
