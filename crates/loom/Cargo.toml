@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dashmap = "7.0.0-rc2"
 tokio = { version = "1.50", features = ["full"] }
 tower-lsp = "0.20.0"
 tracing = "0.1.44"
