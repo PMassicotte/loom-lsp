@@ -632,6 +632,8 @@ dependencies = [
  "clap",
  "dashmap 7.0.0-rc2",
  "loom-config",
+ "loom-parse",
+ "loom-vdoc",
  "tokio",
  "tower-lsp",
  "tracing",

@@ -1,18 +1,22 @@
 use clap::Parser;
 use dashmap::DashMap;
 use loom_config::{Config, load_config, load_config_from};
+use loom_parse::parse_qmd;
+use loom_vdoc::{VirtualDocument, build_virtual_docs};
 use std::path::PathBuf;
 
 use std::sync::Arc;
 use tower_lsp::lsp_types::{
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    InitializeParams, InitializeResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, Server};
 
 #[derive(Debug)]
 struct LoomServer {
     documents: Arc<DashMap<Url, String>>,
+    virtual_documents: Arc<DashMap<Url, Vec<VirtualDocument>>>,
     #[allow(dead_code)]
     config: Config,
 }
@@ -49,7 +53,12 @@ impl LanguageServer for LoomServer {
 
         tracing::info!("Document opened: {} ({} bytes)", uri, text.len());
 
-        self.documents.insert(uri, text);
+        let chunks = parse_qmd(&text).unwrap();
+        let vdocs = build_virtual_docs(&chunks, text.lines().count() as u32);
+        tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
+
+        self.documents.insert(uri.clone(), text);
+        self.virtual_documents.insert(uri, vdocs);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -66,7 +75,12 @@ impl LanguageServer for LoomServer {
 
         tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
 
-        self.documents.insert(uri, text);
+        let chunks = parse_qmd(&text).unwrap();
+        let vdocs = build_virtual_docs(&chunks, text.lines().count() as u32);
+        tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
+
+        self.documents.insert(uri.clone(), text);
+        self.virtual_documents.insert(uri, vdocs);
     }
 }
 
@@ -106,6 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the LSP service and the socket to listen for incoming messages.
     let server = LoomServer {
         documents: Arc::new(DashMap::new()),
+        virtual_documents: Arc::new(DashMap::new()),
         config,
     };
 
