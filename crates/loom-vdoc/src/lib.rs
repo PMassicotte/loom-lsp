@@ -10,6 +10,12 @@ pub struct VirtualDocument {
     pub live_ranges: Vec<Range<u32>>,
 }
 
+impl VirtualDocument {
+    pub fn is_live(&self, line: u32) -> bool {
+        self.live_ranges.iter().any(|r| r.contains(&line))
+    }
+}
+
 pub fn build_virtual_docs(chunks: &[CodeChunk], total_lines: u32) -> Vec<VirtualDocument> {
     let mut by_language: HashMap<String, Vec<&CodeChunk>> = HashMap::new();
 
