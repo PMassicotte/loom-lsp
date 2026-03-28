@@ -1,0 +1,23 @@
+---
+source: crates/loom-vdoc/src/lib.rs
+expression: vdoc
+---
+[
+    VirtualDocument {
+        language: "python",
+        content: "\n\n\n\n\n\n\n#| label: py-setup\nimport matplotlib.pyplot as plt\nx = range(1, 11)\n\n\n\n\n\n\n\n\n\n\n\n\n\n#| label: py-plot\ny = [i**2 for i in x]\nplt.plot(list(x), y)\nplt.show()\n\n\n",
+        version: 0,
+        live_ranges: [
+            7..10,
+            23..27,
+        ],
+    },
+    VirtualDocument {
+        language: "r",
+        content: "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n#| label: r-plot\nlibrary(ggplot2)\ndf <- data.frame(x = 1:10, y = (1:10)^2)\n\n\n\n\n\n\n\n\n\n\n\n",
+        version: 0,
+        live_ranges: [
+            15..18,
+        ],
+    },
+]

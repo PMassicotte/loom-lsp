@@ -661,6 +661,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-vdoc"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "loom-parse",
+]
+
+[[package]]
 name = "lsp-types"
 version = "0.94.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
