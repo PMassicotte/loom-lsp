@@ -1,24 +1,133 @@
-use std::sync::atomic::AtomicI64;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot};
 
 use anyhow::Result;
+use serde_json::Value;
 
 #[derive(Debug)]
 pub struct LspTransport {
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-
-    #[allow(dead_code)]
     next_id: AtomicI64,
+    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
+    notifications: mpsc::Receiver<Value>,
+    _reader: tokio::task::JoinHandle<()>,
+}
+
+pub struct DelegateServer {
+    transport: LspTransport,
+    state: DelegateState,
+    server_capabilities: Option<lsp_types::ServerCapabilities>,
+}
+
+#[derive(Debug, PartialEq)]
+enum DelegateState {
+    Starting,
+    Ready,
+    ShuttingDown,
+}
+
+impl DelegateServer {
+    pub fn spawn(command: &[String]) -> Result<Self> {
+        let transport = LspTransport::spawn(command)?;
+        Ok(Self {
+            transport,
+            state: DelegateState::Starting,
+            server_capabilities: None,
+        })
+    }
+
+    pub async fn initialize(&mut self, root_uri: Option<lsp_types::Uri>) -> Result<()> {
+        let params = lsp_types::InitializeParams {
+            process_id: None,
+            root_uri,
+            capabilities: lsp_types::ClientCapabilities::default(),
+            ..Default::default()
+        };
+
+        let response = self
+            .transport
+            .send_request("initialize", serde_json::to_value(params)?)
+            .await?;
+
+        let result: lsp_types::InitializeResult =
+            serde_json::from_value(response["result"].clone())
+                .map_err(|e| anyhow::anyhow!("failed to parse initialize result: {e}"))?;
+
+        self.server_capabilities = Some(result.capabilities);
+
+        self.transport
+            .send_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {},
+            }))
+            .await?;
+
+        self.state = DelegateState::Ready;
+        Ok(())
+    }
+}
+
+async fn recv_raw(stdout: &mut BufReader<ChildStdout>) -> Result<String> {
+    let mut content_length = None;
+    let mut buffer = String::new();
+
+    loop {
+        buffer.clear();
+        let bytes_read = stdout.read_line(&mut buffer).await?;
+        if bytes_read == 0 {
+            return Err(anyhow::anyhow!("LSP server closed the connection"));
+        }
+        let line = buffer.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("Content-Length: ") {
+            content_length = Some(rest.parse::<usize>()?);
+        }
+    }
+
+    let content_length =
+        content_length.ok_or_else(|| anyhow::anyhow!("missing Content-Length header"))?;
+
+    let mut content_buffer = vec![0; content_length];
+    stdout.read_exact(&mut content_buffer).await?;
+
+    Ok(String::from_utf8(content_buffer)?)
+}
+
+async fn reader_loop(
+    mut stdout: BufReader<ChildStdout>,
+    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
+    notifications: mpsc::Sender<Value>,
+) {
+    loop {
+        let raw = match recv_raw(&mut stdout).await {
+            Ok(raw) => raw,
+            Err(_) => break,
+        };
+        let msg: Value = match serde_json::from_str(&raw) {
+            Ok(msg) => msg,
+            Err(_) => continue,
+        };
+        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
+            let sender = pending.lock().unwrap().remove(&id);
+            if let Some(sender) = sender {
+                let _ = sender.send(msg);
+            }
+        } else {
+            let _ = notifications.send(msg).await;
+        }
+    }
 }
 
 impl LspTransport {
     pub fn spawn(command: &[String]) -> Result<Self> {
-        // This will contains the command and its arguments, so we need to split it into the
-        // command and its arguments. For example ["pyright-langserver", "--stdio"] will be split
-        // into "pyright-langserver" and ["--stdio"].
         let (cmd, args) = command
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("command must not be empty"))?;
@@ -42,10 +151,21 @@ impl LspTransport {
             .take()
             .ok_or_else(|| anyhow::anyhow!("failed to open stdout"))?;
 
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (notif_tx, notif_rx) = mpsc::channel(64);
+
+        let reader = tokio::spawn(reader_loop(
+            BufReader::new(stdout),
+            Arc::clone(&pending),
+            notif_tx,
+        ));
+
         Ok(Self {
             stdin,
-            stdout: BufReader::new(stdout),
             next_id: AtomicI64::new(0),
+            pending,
+            notifications: notif_rx,
+            _reader: reader,
         })
     }
 
@@ -57,49 +177,28 @@ impl LspTransport {
         Ok(())
     }
 
-    pub async fn send_message(&mut self, msg: serde_json::Value) -> Result<()> {
+    pub async fn send_message(&mut self, msg: Value) -> Result<()> {
         let json = serde_json::to_string(&msg)?;
         self.send_raw(&json).await
     }
 
-    // This method reads the raw LSP message from the stdout of the child process. It first reads
-    // the headers to determine the content length, and then reads the content based on that
-    // length.
-    async fn recv_raw(&mut self) -> Result<String> {
-        let mut content_length = None;
-        let mut buffer = String::new();
-
-        loop {
-            buffer.clear();
-
-            let bytes_read = self.stdout.read_line(&mut buffer).await?;
-            if bytes_read == 0 {
-                return Err(anyhow::anyhow!("LSP server closed the connection"));
-            }
-
-            let line = buffer.trim_end();
-            if line.is_empty() {
-                break;
-            }
-
-            if let Some(rest) = line.strip_prefix("Content-Length: ") {
-                content_length = Some(rest.parse::<usize>()?);
-            }
-        }
-
-        let content_length =
-            content_length.ok_or_else(|| anyhow::anyhow!("missing Content-Length header"))?;
-
-        let mut content_buffer = vec![0; content_length];
-        self.stdout.read_exact(&mut content_buffer).await?;
-
-        Ok(String::from_utf8(content_buffer)?)
+    pub async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        self.send_message(request).await?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("request cancelled: LSP server closed"))
     }
 
-    pub async fn recv_message(&mut self) -> Result<serde_json::Value> {
-        let raw = self.recv_raw().await?;
-        let msg = serde_json::from_str(&raw)?;
-        Ok(msg)
+    pub async fn next_notification(&mut self) -> Option<Value> {
+        self.notifications.recv().await
     }
 }
 
@@ -121,16 +220,70 @@ mod tests {
     async fn test_framing_round_trip() {
         let mut transport = LspTransport::spawn(&["cat".to_string()]).unwrap();
 
-        let msg = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize"
-        });
+        // cat echoes back whatever we send, so send_request will receive the echoed request
+        // as its response (sufficient to verify framing correctness).
+        let response = transport
+            .send_request("initialize", serde_json::json!({}))
+            .await
+            .unwrap();
 
-        transport.send_message(msg.clone()).await.unwrap();
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["method"], "initialize");
+        assert_eq!(response["id"], 0);
+    }
 
-        let received = transport.recv_message().await.unwrap();
-        assert_eq!(received, msg);
+    #[tokio::test]
+    #[ignore = "requires pyright-langserver in PATH"]
+    async fn test_pyright_initialize() {
+        let mut transport =
+            LspTransport::spawn(&["pyright-langserver".to_string(), "--stdio".to_string()])
+                .unwrap();
+
+        let response = transport
+            .send_request(
+                "initialize",
+                serde_json::json!({
+                    "processId": null,
+                    "rootUri": null,
+                    "capabilities": {},
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            response
+                .get("result")
+                .and_then(|r| r.get("capabilities"))
+                .is_some(),
+            "expected capabilities in initialize response, got: {response}"
+        );
+
+        transport
+            .send_request("shutdown", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        transport
+            .send_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "exit",
+            }))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires pyright-langserver in PATH"]
+    async fn test_delegate_initialize() {
+        let mut server =
+            DelegateServer::spawn(&["pyright-langserver".to_string(), "--stdio".to_string()])
+                .unwrap();
+
+        server.initialize(None).await.unwrap();
+
+        assert_eq!(server.state, DelegateState::Ready);
+        assert!(server.server_capabilities.is_some());
     }
 
     #[test]
