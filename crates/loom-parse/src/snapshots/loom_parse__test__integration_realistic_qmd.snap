@@ -1,0 +1,18 @@
+---
+source: crates/loom-parse/src/lib.rs
+expression: chunks
+---
+[
+    CodeChunk {
+        language: "python",
+        content: "#| label: setup\nimport pandas as pd\ndf = pd.read_csv(\"data.csv\")",
+        start_line: 7,
+        end_line: 9,
+    },
+    CodeChunk {
+        language: "r",
+        content: "library(tidyverse)",
+        start_line: 15,
+        end_line: 15,
+    },
+]

@@ -51,6 +51,7 @@ fn collect_chunks(node: tree_sitter::Node, source: &[u8], chunks: &mut Vec<CodeC
             let content = raw.trim_end_matches('\n').to_owned();
             let start_line = cn.start_position().row as u32;
             let end_line = (cn.end_position().row - 1) as u32;
+
             chunks.push(CodeChunk {
                 language: lang,
                 content,
@@ -109,5 +110,41 @@ plt.show()
         let source = "```r\nx <- 1\n```\n";
         let chunks = super::parse_qmd(source).unwrap();
         assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_integration_realistic_qmd() {
+        let source = r#"---
+title: "Test"
+---
+
+Some markdown here.
+
+```{python}
+#| label: setup
+import pandas as pd
+df = pd.read_csv("data.csv")
+```
+
+More text.
+
+```{r}
+library(tidyverse)
+```
+"#;
+        let chunks = super::parse_qmd(source).unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].language, "python");
+        assert_eq!(chunks[1].language, "r");
+
+        // #| lines are kept in content for 1:1 buffer mapping
+        assert!(chunks[0].content.contains("#| label: setup"));
+        assert!(chunks[0].content.contains("import pandas as pd"));
+
+        // line numbers refer to actual buffer positions
+        assert_eq!(chunks[0].start_line, 7);
+        assert_eq!(chunks[1].start_line, 15);
+
+        insta::assert_debug_snapshot!(chunks);
     }
 }
