@@ -1,5 +1,9 @@
 # Loom
 
+[![Build](https://github.com/PMassicotte/loom/actions/workflows/rust.yml/badge.svg)](https://github.com/PMassicotte/loom/actions/workflows/rust.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
+
 Write Quarto documents and get full IDE support for every language in your notebook — at the same time.
 
 ## The problem
