@@ -1,0 +1,13 @@
+---
+title: "Single Python Chunk"
+---
+
+Some markdown here.
+
+```{python}
+import pandas as pd
+df = pd.read_csv("data.csv")
+df.describe()
+```
+
+More markdown after.

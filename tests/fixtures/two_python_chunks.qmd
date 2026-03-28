@@ -1,0 +1,21 @@
+---
+title: "Two Python Chunks"
+---
+
+Some markdown here.
+
+```{python}
+#| label: setup
+import pandas as pd
+df = pd.read_csv("data.csv")
+```
+
+More markdown between chunks.
+
+```{python}
+#| label: analysis
+df.describe()
+df.head()
+```
+
+Trailing markdown.

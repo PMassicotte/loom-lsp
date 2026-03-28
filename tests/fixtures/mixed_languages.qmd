@@ -1,0 +1,30 @@
+---
+title: "Mixed Languages"
+---
+
+Introduction text.
+
+```{python}
+#| label: py-setup
+import matplotlib.pyplot as plt
+x = range(1, 11)
+```
+
+Some explanation.
+
+```{r}
+#| label: r-plot
+library(ggplot2)
+df <- data.frame(x = 1:10, y = (1:10)^2)
+```
+
+More explanation.
+
+```{python}
+#| label: py-plot
+y = [i**2 for i in x]
+plt.plot(list(x), y)
+plt.show()
+```
+
+Conclusion.

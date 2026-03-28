@@ -1,0 +1,18 @@
+[server]
+log_level = "info"
+
+[languages.python]
+server_command = ["pyright-langserver", "--stdio"]
+root_markers = ["pyproject.toml", "setup.py"]
+preamble = "import pandas as pd\nimport numpy as np\n"
+settings = { python = { analysis = { typeCheckingMode = "basic" } } }
+
+[languages.r]
+server_command = ["R", "--slave", "-e", "languageserver::run()"]
+root_markers = [".Rproj", "DESCRIPTION"]
+
+[languages.markdown]
+server_command = ["marksman", "server"]
+
+[languages.yaml]
+server_command = ["yaml-language-server", "--stdio"]

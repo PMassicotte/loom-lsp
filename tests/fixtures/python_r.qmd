@@ -1,0 +1,17 @@
+---
+title: "Test"
+---
+
+Some markdown here.
+
+```{python}
+#| label: setup
+import pandas as pd
+df = pd.read_csv("data.csv")
+```
+
+More text.
+
+```{r}
+library(tidyverse)
+```

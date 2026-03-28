@@ -89,32 +89,19 @@ pub fn merge_configs(base: Config, overlay: Config) -> Config {
 mod tests {
     use super::*;
 
-    fn get_sample_config() -> &'static str {
-        r#"
-[server]
-log_level = "info"
-
-[languages.python]
-server_command = ["pyright-langserver", "--stdio"]
-root_markers = ["pyproject.toml", "setup.py"]
-preamble = "import pandas as pd\nimport numpy as np\n"
-settings = { python = { analysis = { typeCheckingMode = "basic" } } }
-
-[languages.r]
-server_command = ["R", "--slave", "-e", "languageserver::run()"]
-root_markers = [".Rproj", "DESCRIPTION"]
-
-[languages.markdown]
-server_command = ["marksman", "server"]
-
-[languages.yaml]
-server_command = ["yaml-language-server", "--stdio"]
-"#
+    macro_rules! fixture {
+        ($name:expr) => {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/",
+                $name
+            ))
+        };
     }
 
     #[test]
     fn test_parse_config() {
-        let config = parse_config(get_sample_config()).unwrap();
+        let config = parse_config(fixture!("full_config.toml")).unwrap();
         assert_eq!(
             config.languages["python"].server_command,
             vec!["pyright-langserver", "--stdio"]
@@ -123,7 +110,7 @@ server_command = ["yaml-language-server", "--stdio"]
 
     #[test]
     fn test_merge_configs() {
-        let base = parse_config(get_sample_config()).unwrap();
+        let base = parse_config(fixture!("full_config.toml")).unwrap();
 
         let overlay = parse_config(
             r#"
