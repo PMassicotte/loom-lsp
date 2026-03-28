@@ -59,6 +59,15 @@ impl LanguageServer for LoomServer {
 
         self.documents.remove(&uri);
     }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let text = params.content_changes[0].text.clone();
+
+        tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
+
+        self.documents.insert(uri, text);
+    }
 }
 
 #[derive(Parser)]
