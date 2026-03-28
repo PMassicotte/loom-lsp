@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicI64;
 
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
 use anyhow::Result;
@@ -9,6 +9,8 @@ use anyhow::Result;
 pub struct LspTransport {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+
+    #[allow(dead_code)]
     next_id: AtomicI64,
 }
 
@@ -46,6 +48,59 @@ impl LspTransport {
             next_id: AtomicI64::new(0),
         })
     }
+
+    async fn send_raw(&mut self, json: &str) -> Result<()> {
+        let content_length = json.len();
+        let message = format!("Content-Length: {content_length}\r\n\r\n{json}");
+        self.stdin.write_all(message.as_bytes()).await?;
+        self.stdin.flush().await?;
+        Ok(())
+    }
+
+    pub async fn send_message(&mut self, msg: serde_json::Value) -> Result<()> {
+        let json = serde_json::to_string(&msg)?;
+        self.send_raw(&json).await
+    }
+
+    // This method reads the raw LSP message from the stdout of the child process. It first reads
+    // the headers to determine the content length, and then reads the content based on that
+    // length.
+    async fn recv_raw(&mut self) -> Result<String> {
+        let mut content_length = None;
+        let mut buffer = String::new();
+
+        loop {
+            buffer.clear();
+
+            let bytes_read = self.stdout.read_line(&mut buffer).await?;
+            if bytes_read == 0 {
+                return Err(anyhow::anyhow!("LSP server closed the connection"));
+            }
+
+            let line = buffer.trim_end();
+            if line.is_empty() {
+                break;
+            }
+
+            if let Some(rest) = line.strip_prefix("Content-Length: ") {
+                content_length = Some(rest.parse::<usize>()?);
+            }
+        }
+
+        let content_length =
+            content_length.ok_or_else(|| anyhow::anyhow!("missing Content-Length header"))?;
+
+        let mut content_buffer = vec![0; content_length];
+        self.stdout.read_exact(&mut content_buffer).await?;
+
+        Ok(String::from_utf8(content_buffer)?)
+    }
+
+    pub async fn recv_message(&mut self) -> Result<serde_json::Value> {
+        let raw = self.recv_raw().await?;
+        let msg = serde_json::from_str(&raw)?;
+        Ok(msg)
+    }
 }
 
 #[cfg(test)]
@@ -60,6 +115,22 @@ mod tests {
             "failed to spawn cat: {:?}",
             transport.err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_framing_round_trip() {
+        let mut transport = LspTransport::spawn(&["cat".to_string()]).unwrap();
+
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize"
+        });
+
+        transport.send_message(msg.clone()).await.unwrap();
+
+        let received = transport.recv_message().await.unwrap();
+        assert_eq!(received, msg);
     }
 
     #[test]
