@@ -1,0 +1,13 @@
+[package]
+name = "loom-delegate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+lsp-types = "0.97.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.50.0", features = ["full"] }
+tracing = "0.1.44"
+which = "8.0.2"
