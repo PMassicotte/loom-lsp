@@ -1,6 +1,7 @@
 use loom_parse::CodeChunk;
 use std::collections::HashMap;
 use std::ops::Range;
+use tower_lsp::lsp_types;
 
 #[derive(Debug, Clone)]
 pub struct VirtualDocument {
@@ -8,6 +9,7 @@ pub struct VirtualDocument {
     pub content: String,
     pub version: i32,
     pub live_ranges: Vec<Range<u32>>,
+    pub uri: lsp_types::Url,
 }
 
 impl VirtualDocument {
@@ -16,7 +18,11 @@ impl VirtualDocument {
     }
 }
 
-pub fn build_virtual_docs(chunks: &[CodeChunk], total_lines: u32) -> Vec<VirtualDocument> {
+pub fn build_virtual_docs(
+    chunks: &[CodeChunk],
+    total_lines: u32,
+    parent_uri: &lsp_types::Url,
+) -> Vec<VirtualDocument> {
     let mut by_language: HashMap<String, Vec<&CodeChunk>> = HashMap::new();
 
     for chunk in chunks {
@@ -44,11 +50,15 @@ pub fn build_virtual_docs(chunks: &[CodeChunk], total_lines: u32) -> Vec<Virtual
             .map(|chunk| chunk.start_line..chunk.end_line + 1)
             .collect();
 
+        let mut uri = parent_uri.clone();
+        uri.set_fragment(Some(&language));
+
         vdoc.push(VirtualDocument {
             language,
             content,
             version: 0,
             live_ranges,
+            uri,
         });
     }
 
@@ -59,7 +69,6 @@ pub fn build_virtual_docs(chunks: &[CodeChunk], total_lines: u32) -> Vec<Virtual
 #[cfg(test)]
 mod test {
     use loom_parse::parse_qmd;
-
     use crate::build_virtual_docs;
 
     macro_rules! fixture {
@@ -77,8 +86,9 @@ mod test {
         let input_str = fixture!("mixed_languages.qmd");
         let total_lines = input_str.lines().count();
 
+        let parent_uri = tower_lsp::lsp_types::Url::parse("file:///test/mixed_languages.qmd").unwrap();
         let chunks = parse_qmd(input_str).unwrap();
-        let vdoc = build_virtual_docs(&chunks, total_lines as u32);
+        let vdoc = build_virtual_docs(&chunks, total_lines as u32, &parent_uri);
 
         insta::assert_debug_snapshot!(vdoc);
     }

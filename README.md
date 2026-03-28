@@ -24,3 +24,36 @@ Loom doesn't replace pyright or the R language server, it connects them. If you'
 ## Any editor, any workflow
 
 Loom speaks standard LSP, so it works with Neovim, VS Code, Emacs, or any editor with LSP support. If your editor can run a language server, it can run Loom.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Editor["Your Editor\n(Neovim, VS Code, …)"]
+
+    subgraph Loom
+        LS["Language Server\n(LSP endpoint)"]
+        Parser["Quarto Parser\n(chunk boundaries)"]
+        Registry["Delegate Registry"]
+
+        subgraph Delegates
+            DS1["DelegateServer\n(Python)"]
+            DS2["DelegateServer\n(R)"]
+            DS3["DelegateServer\n(Markdown)"]
+        end
+    end
+
+    Pyright["pyright-langserver"]
+    RLS["r-languageserver"]
+    Marksman["marksman"]
+
+    Editor -- "LSP (stdio)" --> LS
+    LS --> Parser
+    Parser --> Registry
+    Registry --> DS1
+    Registry --> DS2
+    Registry --> DS3
+    DS1 -- "LSP (stdio)" --> Pyright
+    DS2 -- "LSP (stdio)" --> RLS
+    DS3 -- "LSP (stdio)" --> Marksman
+```

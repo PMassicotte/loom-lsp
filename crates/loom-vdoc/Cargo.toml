@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 loom-parse = { path = "../loom-parse" }
+tower-lsp = "0.20.0"
 
 [dev-dependencies]
 insta = "1.47.0"
