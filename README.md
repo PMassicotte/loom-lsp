@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-experimental-red.svg)]()
 
-Write Quarto documents and get full IDE support for every language in your notebook at the same time.
+Write [Quarto](https://quarto.org/) documents and get full IDE support for every language in your notebook at the same time.
 
 ## The problem
 
