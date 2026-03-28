@@ -3,8 +3,9 @@
 [![Build](https://github.com/PMassicotte/loom/actions/workflows/rust.yml/badge.svg)](https://github.com/PMassicotte/loom/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
+[![Status](https://img.shields.io/badge/status-experimental-red.svg)]()
 
-Write Quarto documents and get full IDE support for every language in your notebook — at the same time.
+Write Quarto documents and get full IDE support for every language in your notebook at the same time.
 
 ## The problem
 
@@ -23,7 +24,3 @@ Loom doesn't replace pyright or the R language server, it connects them. If you'
 ## Any editor, any workflow
 
 Loom speaks standard LSP, so it works with Neovim, VS Code, Emacs, or any editor with LSP support. If your editor can run a language server, it can run Loom.
-
----
-
-_Loom is early-stage software under active development._
