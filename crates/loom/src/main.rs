@@ -3,16 +3,19 @@ mod registry;
 use clap::Parser;
 use dashmap::DashMap;
 use loom_config::{load_config, load_config_from};
+use loom_delegate::TransportSender;
 use loom_parse::{CodeChunk, language_at_position, parse_qmd};
 use loom_vdoc::{VirtualDocument, build_virtual_docs};
 use registry::DelegateRegistry;
 use std::path::PathBuf;
 
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    Position, ServerCapabilities, ServerInfo, TextDocumentIdentifier, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, Server};
 
@@ -22,6 +25,11 @@ struct LoomServer {
     chunks: DashMap<Url, Vec<CodeChunk>>,
     virtual_documents: DashMap<Url, Vec<VirtualDocument>>,
     registry: Mutex<DelegateRegistry>,
+    /// Caches the most recent raw completion result per language, populated by background tasks
+    /// that survive tower-lsp task cancellation (e.g. when a slow LSP like Julia takes > 300ms). I
+    /// guess there could be a better way to correlate in-flight requests and responses, but this
+    /// is simple and seems to work well in practice.
+    completion_cache: Arc<DashMap<String, serde_json::Value>>,
 }
 
 #[tower_lsp::async_trait]
@@ -67,21 +75,73 @@ impl LanguageServer for LoomServer {
         self.documents.insert(uri.clone(), text);
         self.chunks.insert(uri.clone(), parsed_chunks);
 
-        let mut registry = self.registry.lock().await;
-        for vdoc in &vdocs {
-            if registry.is_failed(&vdoc.language) {
-                continue;
-            }
-            match registry.get_or_spawn(&vdoc.language).await {
-                Ok(delegate) => {
-                    if let Err(e) = delegate
-                        .open_document(vdoc.uri.clone(), &vdoc.language, &vdoc.content)
-                        .await
-                    {
-                        tracing::warn!("failed to open virtual doc on delegate: {e}");
-                    }
+        // Collect which languages need a new delegate spawned. Hold the registry lock only long
+        // enough for this check — not during the multi-second LSP initialize handshake.
+        let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
+            let registry = self.registry.lock().await;
+            vdocs
+                .iter()
+                .filter_map(|vdoc| {
+                    registry
+                        .spawn_params(&vdoc.language)
+                        .map(|(cmd, root_uri)| (vdoc.language.clone(), cmd, root_uri))
+                })
+                .collect()
+        };
+
+        // Initialize all needed delegates concurrently, with no lock held.
+        let init_futs = to_spawn.into_iter().map(|(lang, cmd, root_uri)| async move {
+            let cmd_str = cmd.join(" ");
+            let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!("failed to spawn `{cmd_str}`: {e}");
+                    return (lang, Err(()));
                 }
-                Err(e) => tracing::warn!("failed to spawn delegate for {}: {e}", vdoc.language),
+            };
+            match delegate.initialize(root_uri).await {
+                Ok(()) => (lang, Ok(delegate)),
+                Err(e) => {
+                    tracing::warn!("failed to initialize `{cmd_str}`: {e}");
+                    (lang, Err(()))
+                }
+            }
+        });
+        let init_results = futures::future::join_all(init_futs).await;
+
+        // Insert results — brief lock per insert.
+        let mut handles = Vec::new();
+        {
+            let mut registry = self.registry.lock().await;
+            for (lang, result) in init_results {
+                match result {
+                    Ok(delegate) => registry.insert_ready(lang, delegate),
+                    Err(()) => registry.mark_failed(lang),
+                }
+            }
+            for vdoc in &vdocs {
+                if registry.is_failed(&vdoc.language) {
+                    continue;
+                }
+                match registry.get_or_spawn(&vdoc.language).await {
+                    Ok(handle) => handles.push((
+                        handle,
+                        vdoc.uri.clone(),
+                        vdoc.language.clone(),
+                        vdoc.content.clone(),
+                    )),
+                    Err(e) => tracing::warn!("failed to get delegate for {}: {e}", vdoc.language),
+                }
+            }
+        }
+        for (handle, vdoc_uri, language, content) in handles {
+            if let Err(e) = handle
+                .lock()
+                .await
+                .open_document(vdoc_uri, &language, &content)
+                .await
+            {
+                tracing::warn!("failed to open virtual doc on delegate: {e}");
             }
         }
 
@@ -97,20 +157,24 @@ impl LanguageServer for LoomServer {
         self.chunks.remove(&uri);
 
         if let Some((_, vdocs)) = self.virtual_documents.remove(&uri) {
-            let mut registry = self.registry.lock().await;
-            for vdoc in vdocs {
-                if registry.is_failed(&vdoc.language) {
-                    continue;
-                }
-                match registry.get_or_spawn(&vdoc.language).await {
-                    Ok(delegate) => {
-                        if let Err(e) = delegate.close_document(vdoc.uri).await {
-                            tracing::warn!("failed to close virtual doc on delegate: {e}");
+            let mut handles = Vec::new();
+            {
+                let mut registry = self.registry.lock().await;
+                for vdoc in &vdocs {
+                    if registry.is_failed(&vdoc.language) {
+                        continue;
+                    }
+                    match registry.get_or_spawn(&vdoc.language).await {
+                        Ok(handle) => handles.push((handle, vdoc.uri.clone())),
+                        Err(e) => {
+                            tracing::warn!("failed to get delegate for {}: {e}", vdoc.language)
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("failed to get delegate for {}: {e}", vdoc.language)
-                    }
+                }
+            }
+            for (handle, vdoc_uri) in handles {
+                if let Err(e) = handle.lock().await.close_document(vdoc_uri).await {
+                    tracing::warn!("failed to close virtual doc on delegate: {e}");
                 }
             }
         }
@@ -140,21 +204,29 @@ impl LanguageServer for LoomServer {
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri.clone(), vdocs.clone());
 
-        let mut registry = self.registry.lock().await;
-        for vdoc in &vdocs {
-            if registry.is_failed(&vdoc.language) {
-                continue;
-            }
-            match registry.get_or_spawn(&vdoc.language).await {
-                Ok(delegate) => {
-                    if let Err(e) = delegate
-                        .update_document(vdoc.uri.clone(), vdoc.version, &vdoc.content)
-                        .await
-                    {
-                        tracing::warn!("failed to update virtual doc on delegate: {e}");
-                    }
+        let mut handles = Vec::new();
+        {
+            let mut registry = self.registry.lock().await;
+            for vdoc in &vdocs {
+                if registry.is_failed(&vdoc.language) {
+                    continue;
                 }
-                Err(e) => tracing::warn!("failed to get delegate for {}: {e}", vdoc.language),
+                match registry.get_or_spawn(&vdoc.language).await {
+                    Ok(handle) => {
+                        handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()))
+                    }
+                    Err(e) => tracing::warn!("failed to get delegate for {}: {e}", vdoc.language),
+                }
+            }
+        }
+        for (handle, vdoc_uri, version, content) in handles {
+            if let Err(e) = handle
+                .lock()
+                .await
+                .update_document(vdoc_uri, version, &content)
+                .await
+            {
+                tracing::warn!("failed to update virtual doc on delegate: {e}");
             }
         }
     }
@@ -185,9 +257,9 @@ impl LanguageServer for LoomServer {
             }
         };
 
-        let (vdoc_uri, vdoc_content, vdoc_version) = match self.virtual_documents.get(uri) {
+        let vdoc_uri = match self.virtual_documents.get(uri) {
             Some(vdocs) => match vdocs.iter().find(|v| v.language == language) {
-                Some(vdoc) => (vdoc.uri.clone(), vdoc.content.clone(), vdoc.version),
+                Some(vdoc) => vdoc.uri.clone(),
                 None => {
                     tracing::info!("completion: no virtual doc for language {language}");
                     return Ok(None);
@@ -203,30 +275,62 @@ impl LanguageServer for LoomServer {
             "forwarding completion to delegate: language={language} uri={vdoc_uri} line={line} char={character}"
         );
 
-        let mut registry = self.registry.lock().await;
-        let delegate = registry
-            .get_or_spawn(&language)
-            .await
-            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+        // Get a cloneable sender — hold the per-delegate lock only long enough to clone it so
+        // that other tasks (e.g. did_change) can acquire the lock while we await the response.
+        let sender: TransportSender = {
+            let mut registry = self.registry.lock().await;
+            let handle = registry
+                .get_or_spawn(&language)
+                .await
+                .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+            handle.lock().await.sender()
+        };
 
-        if let Err(e) = delegate
-            .update_document(vdoc_uri.clone(), vdoc_version + 1, &vdoc_content)
-            .await
-        {
-            tracing::warn!("completion: failed to sync doc before completion: {e}");
+        // Check the cache first — a previous background task may have stored the result after
+        // its tower-lsp task was cancelled (e.g. slow Julia LSP completing after the timeout).
+        if let Some((_, cached)) = self.completion_cache.remove(&language) {
+            tracing::info!("completion: serving cached result for {language}");
+            let response: Option<CompletionResponse> =
+                serde_json::from_value(cached).ok().flatten();
+            return Ok(response);
         }
 
-        let result = delegate
-            .completion(vdoc_uri, line, character)
-            .await
+        // No locks held from this point. The did_change handler already keeps the delegate
+        // document current — sending another didChange here would duplicate version numbers
+        // and corrupt the delegate LSP's document state.
+        let completion_params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: vdoc_uri },
+                position: Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        let params_value = serde_json::to_value(completion_params)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
-        let response: Option<CompletionResponse> =
-            serde_json::from_value(result).map_err(|e: serde_json::Error| {
-                tower_lsp::jsonrpc::Error::invalid_params(e.to_string())
-            })?;
+        // Spawn a detached task so the LSP request survives tower-lsp task cancellation.
+        // neovim sends $/cancelRequest unpredictably (200-300ms); waiting in the tower-lsp
+        // handler is a race we can't win reliably. Instead: always return null immediately,
+        // store the result in cache, and serve it on the next completion trigger.
+        let cache = Arc::clone(&self.completion_cache);
+        let lang = language.clone();
+        tokio::spawn(async move {
+            if let Ok(raw) = sender
+                .send_request("textDocument/completion", params_value)
+                .await
+            {
+                let result = raw["result"].clone();
+                tracing::debug!("completion background result for {lang}: {result}");
+                cache.insert(lang, result);
+            }
+        });
 
-        Ok(response)
+        tracing::info!(
+            "completion: {language} request in flight, returning null (result will be cached)"
+        );
+        Ok(None)
     }
 }
 
@@ -266,6 +370,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chunks: DashMap::new(),
         virtual_documents: DashMap::new(),
         registry: Mutex::new(DelegateRegistry::new(config.languages)),
+        completion_cache: Arc::new(DashMap::new()),
     };
 
     let (service, socket) = tower_lsp::LspService::new(|_client| server);
