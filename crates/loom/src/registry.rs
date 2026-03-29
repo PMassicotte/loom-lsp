@@ -36,7 +36,9 @@ impl DelegateRegistry {
     /// first if it has not been started yet.
     pub async fn get_or_spawn(&mut self, language: &str) -> Result<&mut DelegateServer> {
         if self.failed.contains(language) {
-            return Err(anyhow::anyhow!("delegate for {language} previously failed to start"));
+            return Err(anyhow::anyhow!(
+                "delegate for {language} previously failed to start"
+            ));
         }
 
         if !self.delegates.contains_key(language) {
@@ -45,11 +47,16 @@ impl DelegateRegistry {
                 .get(language)
                 .ok_or_else(|| anyhow::anyhow!("no config for language: {language}"))?;
 
-            let mut delegate = DelegateServer::spawn(&config.server_command)?;
+            let cmd = config.server_command.join(" ");
+
+            let mut delegate = DelegateServer::spawn(&config.server_command)
+                .map_err(|e| anyhow::anyhow!("failed to spawn `{cmd}`: {e}"))?;
+
             if let Err(e) = delegate.initialize(self.root_uri.clone()).await {
                 self.failed.insert(language.to_string());
-                return Err(e);
+                return Err(anyhow::anyhow!("failed to initialize `{cmd}`: {e}"));
             }
+
             tracing::info!("delegate ready for {language}");
             self.delegates.insert(language.to_string(), delegate);
         }
