@@ -34,26 +34,26 @@ flowchart LR
     subgraph Loom
         LS["Language Server\n(LSP endpoint)"]
         Parser["Quarto Parser\n(chunk boundaries)"]
+        VDocs["Virtual Documents\n(per-language, line-padded)"]
         Registry["Delegate Registry"]
 
         subgraph Delegates
             DS1["DelegateServer\n(Python)"]
             DS2["DelegateServer\n(R)"]
-            DS3["DelegateServer\n(Markdown)"]
         end
     end
 
     Pyright["pyright-langserver"]
     RLS["r-languageserver"]
-    Marksman["marksman"]
 
     Editor -- "LSP (stdio)" --> LS
     LS --> Parser
-    Parser --> Registry
+    Parser --> VDocs
+    VDocs --> DS1
+    VDocs --> DS2
+    LS --> Registry
     Registry --> DS1
     Registry --> DS2
-    Registry --> DS3
     DS1 -- "LSP (stdio)" --> Pyright
     DS2 -- "LSP (stdio)" --> RLS
-    DS3 -- "LSP (stdio)" --> Marksman
 ```
