@@ -93,8 +93,8 @@ pub fn build_virtual_docs(
 
 #[cfg(test)]
 mod test {
-    use loom_parse::parse_qmd;
     use crate::build_virtual_docs;
+    use loom_parse::parse_qmd;
 
     macro_rules! fixture {
         ($name:expr) => {
@@ -111,7 +111,8 @@ mod test {
         let input_str = fixture!("mixed_languages.qmd");
         let total_lines = input_str.lines().count();
 
-        let parent_uri = tower_lsp::lsp_types::Url::parse("file:///test/mixed_languages.qmd").unwrap();
+        let parent_uri =
+            tower_lsp::lsp_types::Url::parse("file:///test/mixed_languages.qmd").unwrap();
         let chunks = parse_qmd(input_str).unwrap();
         let vdoc = build_virtual_docs(&chunks, total_lines as u32, &parent_uri);
 
