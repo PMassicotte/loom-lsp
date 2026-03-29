@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
 use anyhow::Result;
 use serde_json::Value;
@@ -46,7 +46,6 @@ impl TransportSender {
 pub(crate) struct LspTransport {
     sender: TransportSender,
     child: tokio::process::Child,
-    notifications: mpsc::Receiver<Value>,
     _reader: tokio::task::JoinHandle<()>,
 }
 
@@ -100,7 +99,6 @@ async fn reader_loop(
     mut stdout: BufReader<ChildStdout>,
     stdin: Arc<AsyncMutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
-    notifications: mpsc::Sender<Value>,
     alive: Arc<std::sync::atomic::AtomicBool>,
 ) {
     loop {
@@ -118,14 +116,15 @@ async fn reader_loop(
                 continue;
             }
         };
-        tracing::debug!("reader_loop recv: id={:?} method={:?}", msg.get("id"), msg.get("method"));
+        tracing::debug!(
+            "reader_loop recv: id={:?} method={:?}",
+            msg.get("id"),
+            msg.get("method")
+        );
         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
             if msg.get("method").is_some() {
-                let response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": null,
-                });
+                // Server-initiated request, respond with null so the delegate doesn't stall.
+                let response = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": null });
                 if let Ok(json) = serde_json::to_string(&response) {
                     send_raw_to(&stdin, &json).await;
                 }
@@ -135,13 +134,15 @@ async fn reader_loop(
                     let _ = sender.send(msg);
                 }
             }
-        } else {
-            let _ = notifications.try_send(msg);
         }
+        // Notifications (no id) are ignored, loom doesn't act on them.
     }
-    // LSP server closed — mark as dead, then cancel all pending requests.
+
+    // LSP server closed mark as dead, then cancel all pending requests.
     alive.store(false, std::sync::atomic::Ordering::Relaxed);
+
     let drained: Vec<_> = pending.lock().unwrap().drain().map(|(_, tx)| tx).collect();
+
     drop(drained);
 }
 
@@ -179,14 +180,12 @@ impl LspTransport {
             .ok_or_else(|| anyhow::anyhow!("failed to open stdout"))?;
 
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let (notif_tx, notif_rx) = mpsc::channel(64);
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
         let reader = tokio::spawn(reader_loop(
             BufReader::new(stdout),
             Arc::clone(&stdin),
             Arc::clone(&pending),
-            notif_tx,
             Arc::clone(&alive),
         ));
 
@@ -200,7 +199,6 @@ impl LspTransport {
         Ok(Self {
             sender,
             child,
-            notifications: notif_rx,
             _reader: reader,
         })
     }
@@ -215,10 +213,6 @@ impl LspTransport {
 
     pub(crate) async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
         self.sender.send_request(method, params).await
-    }
-
-    pub(crate) async fn next_notification(&mut self) -> Option<Value> {
-        self.notifications.recv().await
     }
 
     pub(crate) fn kill(&mut self) {
@@ -242,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_framing_round_trip() {
-        let mut transport = LspTransport::spawn(&["cat".to_string()]).unwrap();
+        let transport = LspTransport::spawn(&["cat".to_string()]).unwrap();
 
         // cat echoes back whatever we send. The reader_loop treats the echoed request
         // (id + method) as a server-initiated request and sends a null response; cat then echoes
@@ -261,7 +255,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires pyright-langserver in PATH"]
     async fn test_pyright_initialize() {
-        let mut transport =
+        let transport =
             LspTransport::spawn(&["pyright-langserver".to_string(), "--stdio".to_string()])
                 .unwrap();
 

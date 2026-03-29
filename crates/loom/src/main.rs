@@ -8,7 +8,6 @@ use loom_parse::{CodeChunk, language_at_position, parse_qmd};
 use loom_vdoc::{VirtualDocument, build_virtual_docs};
 use registry::DelegateRegistry;
 use std::path::PathBuf;
-
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
@@ -21,14 +20,12 @@ use tower_lsp::{LanguageServer, Server};
 
 #[derive(Debug)]
 struct LoomServer {
-    documents: DashMap<Url, String>,
     chunks: DashMap<Url, Vec<CodeChunk>>,
     virtual_documents: DashMap<Url, Vec<VirtualDocument>>,
     registry: Mutex<DelegateRegistry>,
-    /// Caches the most recent raw completion result per language, populated by background tasks
-    /// that survive tower-lsp task cancellation (e.g. when a slow LSP like Julia takes > 300ms). I
-    /// guess there could be a better way to correlate in-flight requests and responses, but this
-    /// is simple and seems to work well in practice.
+    /// Caches the most recent completion result per language. Fast LSPs (pyright) populate this
+    /// via direct await; slow LSPs (Julia) populate it via background tasks. Used as fallback
+    /// when the direct request times out.
     completion_cache: Arc<DashMap<String, serde_json::Value>>,
 }
 
@@ -72,11 +69,10 @@ impl LanguageServer for LoomServer {
         let vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
-        self.documents.insert(uri.clone(), text);
         self.chunks.insert(uri.clone(), parsed_chunks);
 
         // Collect which languages need a new delegate spawned. Hold the registry lock only long
-        // enough for this check — not during the multi-second LSP initialize handshake.
+        // enough for this check not during the multi-second LSP initialize handshake.
         let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
             let registry = self.registry.lock().await;
             vdocs
@@ -90,26 +86,28 @@ impl LanguageServer for LoomServer {
         };
 
         // Initialize all needed delegates concurrently, with no lock held.
-        let init_futs = to_spawn.into_iter().map(|(lang, cmd, root_uri)| async move {
-            let cmd_str = cmd.join(" ");
-            let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!("failed to spawn `{cmd_str}`: {e}");
-                    return (lang, Err(()));
+        let init_futs = to_spawn
+            .into_iter()
+            .map(|(lang, cmd, root_uri)| async move {
+                let cmd_str = cmd.join(" ");
+                let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::warn!("failed to spawn `{cmd_str}`: {e}");
+                        return (lang, Err(()));
+                    }
+                };
+                match delegate.initialize(root_uri).await {
+                    Ok(()) => (lang, Ok(delegate)),
+                    Err(e) => {
+                        tracing::warn!("failed to initialize `{cmd_str}`: {e}");
+                        (lang, Err(()))
+                    }
                 }
-            };
-            match delegate.initialize(root_uri).await {
-                Ok(()) => (lang, Ok(delegate)),
-                Err(e) => {
-                    tracing::warn!("failed to initialize `{cmd_str}`: {e}");
-                    (lang, Err(()))
-                }
-            }
-        });
+            });
         let init_results = futures::future::join_all(init_futs).await;
 
-        // Insert results — brief lock per insert.
+        // Insert results brief lock per insert.
         let mut handles = Vec::new();
         {
             let mut registry = self.registry.lock().await;
@@ -153,7 +151,6 @@ impl LanguageServer for LoomServer {
 
         tracing::info!("Document closed: {}", uri);
 
-        self.documents.remove(&uri);
         self.chunks.remove(&uri);
 
         if let Some((_, vdocs)) = self.virtual_documents.remove(&uri) {
@@ -194,7 +191,6 @@ impl LanguageServer for LoomServer {
 
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
-        self.documents.insert(uri.clone(), text);
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri.clone(), vdocs.clone());
 
@@ -202,7 +198,7 @@ impl LanguageServer for LoomServer {
         {
             let mut registry = self.registry.lock().await;
             for vdoc in &vdocs {
-                // Only send to delegates that are already alive — did_change should not trigger
+                // Only send to delegates that are already alive, did_change should not trigger
                 // a slow re-spawn. A dead delegate will be re-spawned on the next completion.
                 if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
                     handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()));
@@ -231,59 +227,43 @@ impl LanguageServer for LoomServer {
 
         tracing::info!("Completion request at {}:{}:{}", uri, line, character);
 
-        let chunks = match self.chunks.get(uri) {
-            Some(c) => c,
-            None => {
-                tracing::info!("completion: no chunks for {uri}");
-                return Ok(None);
+        // Hold each DashMap ref only briefly — releasing the shard lock before any await prevents
+        // did_change's synchronous insert from blocking Tokio threads.
+        let language = {
+            let chunks = match self.chunks.get(uri) {
+                Some(c) => c,
+                None => return Ok(None),
+            };
+            match language_at_position(&chunks, line) {
+                Some(l) => l.to_string(),
+                None => return Ok(None),
             }
         };
-
-        let language = match language_at_position(&chunks, line) {
-            Some(l) => l.to_string(),
-            None => {
-                tracing::info!("completion: line {line} is not in a code chunk");
-                return Ok(None);
-            }
-        };
-
         let vdoc_uri = match self.virtual_documents.get(uri) {
             Some(vdocs) => match vdocs.iter().find(|v| v.language == language) {
                 Some(vdoc) => vdoc.uri.clone(),
-                None => {
-                    tracing::info!("completion: no virtual doc for language {language}");
-                    return Ok(None);
-                }
+                None => return Ok(None),
             },
-            None => {
-                tracing::info!("completion: no virtual documents for {uri}");
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
 
         tracing::info!(
-            "forwarding completion to delegate: language={language} uri={vdoc_uri} line={line} char={character}"
+            "forwarding completion to delegate: language={language} line={line} char={character}"
         );
 
-        // Get a cloneable sender — never spawn from inside a completion request. Spawning holds
-        // the registry lock for the full LSP initialize handshake (seconds), and neovim's
-        // $/cancelRequest will cancel this task before it finishes, so the spawn always fails
-        // and the delegate never gets inserted. did_open handles spawning; if the delegate
-        // isn't alive yet, return null and wait for did_open to finish.
+        // Never spawn delegates inside completion, did_open handles that.
         let sender: TransportSender = {
             let mut registry = self.registry.lock().await;
             match registry.get_if_alive(&language).await {
                 Some(handle) => handle.lock().await.sender(),
                 None => {
-                    tracing::info!("completion: delegate for {language} not ready yet, returning null");
+                    tracing::info!("completion: delegate for {language} not ready yet");
                     return Ok(None);
                 }
             }
         };
 
-        // Always spawn a fresh LSP request in the background — it overwrites the cache on
-        // completion. neovim sends $/cancelRequest unpredictably so we never await here.
-        let completion_params = CompletionParams {
+        let params_value = serde_json::to_value(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: vdoc_uri },
                 position: Position { line, character },
@@ -291,10 +271,13 @@ impl LanguageServer for LoomServer {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
             context: None,
-        };
-        let params_value = serde_json::to_value(completion_params)
-            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+        })
+        .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
+        // Always send the request in a background task so it survives neovim's
+        // $/cancelRequest, which cancels the tower-lsp handler future. The background
+        // task updates the cache when the LSP responds, regardless of what happens here.
+        let (fresh_tx, fresh_rx) = tokio::sync::oneshot::channel();
         let cache = Arc::clone(&self.completion_cache);
         let lang = language.clone();
         tokio::spawn(async move {
@@ -303,129 +286,40 @@ impl LanguageServer for LoomServer {
                 .await
             {
                 let result = raw["result"].clone();
-                tracing::debug!("completion background result for {lang}: {result}");
-                // Don't cache empty results — they'd overwrite a valid previous cache and
-                // leave all subsequent requests returning null until the next fresh result.
-                let is_empty = result
-                    .get("items")
-                    .and_then(|v| v.as_array())
-                    .map_or(false, |a| a.is_empty())
-                    || result.as_array().map_or(false, |a| a.is_empty());
-                if !is_empty {
-                    cache.insert(lang, result);
+                if !result.is_null() {
+                    cache.insert(lang, result.clone());
+                    let _ = fresh_tx.send(result);
                 }
             }
         });
 
-        // Serve the stale cache as a fallback while the fresh request is in flight, but only if
-        // the cached items actually match what the user is currently typing. nvim-cmp filters
-        // client-side, so stale items from the same context (e.g. the user typed one more
-        // character) are fine. But stale items from a different context (e.g. cached `p*` items
-        // when the user is now at `pd.rea`) produce no matches and close the popup — worse than
-        // returning null.
-        //
-        // Also strip `textEdit` before serving: delegates like LanguageServer.jl embed the exact
-        // cursor range in textEdit, which is stale when the cursor has moved. Without textEdit,
-        // nvim-cmp uses insertText with word-at-cursor replacement, which is always correct.
-        if let Some(cached) = self.completion_cache.get(&language) {
-            let (word, after_separator) = self.documents.get(uri)
-                .map(|text| {
-                    let w = word_at_cursor(&text, line, character);
-                    let sep = is_after_separator(&text, line, character);
-                    (w, sep)
-                })
-                .unwrap_or_default();
-            // After a separator like `.`, the completion context has changed (e.g. `pd.` needs
-            // attribute completions, not the cached module-level items). Don't serve stale cache
-            // here — the fresh request is already in flight.
-            if !after_separator {
-                if let Some(mut filtered) = filter_by_word(&cached, &word) {
-                    tracing::info!(
-                        "completion: serving cached result for {language} (word={word:?}, fresh request in flight)"
-                    );
-                    strip_text_edits(&mut filtered);
-                    let response: Option<CompletionResponse> =
-                        serde_json::from_value(filtered).ok().flatten();
-                    return Ok(response);
-                }
+        // Wait briefly for the background task's result. Fast LSPs (pyright ~50ms) respond
+        // in time and we return fresh completions. Slow LSPs (Julia ~2s) time out and we
+        // fall back to the stale cache, which the background task will eventually update.
+        match tokio::time::timeout(std::time::Duration::from_millis(200), fresh_rx).await {
+            Ok(Ok(result)) => {
+                tracing::info!("completion: fresh result for {language}");
+                return Ok(serde_json::from_value(result).ok().flatten());
             }
-            tracing::info!(
-                "completion: cached result for {language} doesn't match word {word:?}, waiting for fresh request"
-            );
+            _ => {}
         }
 
-        tracing::info!("completion: {language} first request in flight, returning null");
+        // Stale cache fallback. Strip textEdit since cursor positions may be stale.
+        if let Some(cached) = self.completion_cache.get(&language) {
+            let mut value = cached.clone();
+            strip_text_edits(&mut value);
+            tracing::info!("completion: stale cache for {language}");
+            return Ok(serde_json::from_value(value).ok().flatten());
+        }
+
+        tracing::info!("completion: no result for {language}");
         Ok(None)
     }
 }
 
-/// Returns true when the character immediately before the cursor is a member-access separator
-/// (`.`), meaning the user just triggered attribute/method completion. In this case the word
-/// at cursor is empty and the cached items are from a different context, so the cache should
-/// not be served.
-fn is_after_separator(text: &str, line: u32, character: u32) -> bool {
-    let line_text = text.lines().nth(line as usize).unwrap_or("");
-    let char_idx = (character as usize).min(line_text.len());
-    if char_idx == 0 {
-        return false;
-    }
-    line_text[..char_idx].ends_with('.')
-}
-
-/// Extracts the trigger word at the given cursor position: the run of non-separator characters
-/// immediately before `character` on the given line. This is what nvim-cmp uses as the filter
-/// prefix when deciding which completion items to show.
-fn word_at_cursor(text: &str, line: u32, character: u32) -> String {
-    let line_text = text.lines().nth(line as usize).unwrap_or("");
-    let char_idx = (character as usize).min(line_text.len());
-    let prefix = &line_text[..char_idx];
-    const SEPARATORS: &[char] = &[
-        ' ', '\t', '.', '(', ')', '[', ']', '{', '}', ',', ':', '=', '"', '\'', '!', '+', '-',
-        '*', '/', '&', '|', '<', '>',
-    ];
-    prefix
-        .rfind(SEPARATORS)
-        .map(|i| &prefix[i + 1..])
-        .unwrap_or(prefix)
-        .to_string()
-}
-
-/// Returns a filtered copy of `value` (a raw CompletionResponse) keeping only items whose
-/// `insertText` or `label` starts with `word` (case-insensitive). Returns `None` when the word
-/// is non-empty and no items match, so the caller can fall back to returning null rather than
-/// showing a popup with irrelevant entries.
-fn filter_by_word(value: &serde_json::Value, word: &str) -> Option<serde_json::Value> {
-    if word.is_empty() {
-        return Some(value.clone());
-    }
-    let word_lower = word.to_lowercase();
-    let matches = |item: &serde_json::Value| -> bool {
-        let insert = item.get("insertText").and_then(|v| v.as_str()).unwrap_or("");
-        let label = item.get("label").and_then(|v| v.as_str()).unwrap_or("");
-        let text = if !insert.is_empty() { insert } else { label };
-        text.to_lowercase().starts_with(&word_lower)
-    };
-    if let Some(items) = value.as_array() {
-        let filtered: Vec<_> = items.iter().filter(|i| matches(i)).cloned().collect();
-        if filtered.is_empty() { None } else { Some(serde_json::Value::Array(filtered)) }
-    } else if let Some(items) = value.get("items").and_then(|v| v.as_array()) {
-        let filtered: Vec<_> = items.iter().filter(|i| matches(i)).cloned().collect();
-        if filtered.is_empty() {
-            None
-        } else {
-            let mut result = value.clone();
-            result["items"] = serde_json::Value::Array(filtered);
-            Some(result)
-        }
-    } else {
-        Some(value.clone())
-    }
-}
-
-/// Strips `textEdit` from every completion item in a raw `CompletionResponse` JSON value,
-/// promoting `textEdit.newText` to `insertText` when not already set. This prevents stale
-/// position ranges (recorded when the response was first produced) from corrupting insertions
-/// when the cached result is served at a different cursor position.
+/// Strips `textEdit` from every completion item, promoting `textEdit.newText` to `insertText`
+/// when not already set. Stale position ranges from cached responses corrupt insertions when
+/// served at a different cursor position.
 fn strip_text_edits(value: &mut serde_json::Value) {
     let items = if let Some(arr) = value.as_array_mut() {
         arr
@@ -437,14 +331,18 @@ fn strip_text_edits(value: &mut serde_json::Value) {
     for item in items.iter_mut() {
         let new_text = item
             .get("textEdit")
-            .and_then(|te| te.get("newText").or_else(|| te.get("insert").and_then(|r| r.get("newText"))))
+            .and_then(|te| {
+                te.get("newText")
+                    .or_else(|| te.get("insert").and_then(|r| r.get("newText")))
+            })
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         if let Some(obj) = item.as_object_mut() {
             obj.remove("textEdit");
             obj.remove("additionalTextEdits");
             if let Some(text) = new_text {
-                obj.entry("insertText").or_insert_with(|| serde_json::Value::String(text));
+                obj.entry("insertText")
+                    .or_insert_with(|| serde_json::Value::String(text));
             }
         }
     }
@@ -482,7 +380,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let server = LoomServer {
-        documents: DashMap::new(),
         chunks: DashMap::new(),
         virtual_documents: DashMap::new(),
         registry: Mutex::new(DelegateRegistry::new(config.languages)),
