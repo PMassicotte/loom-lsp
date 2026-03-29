@@ -308,28 +308,86 @@ impl LanguageServer for LoomServer {
             }
         });
 
-        // Return the last known result as a stale fallback so the popup stays open while the
-        // fresh request is in flight. nvim-cmp filters client-side, so results from a previous
-        // cursor position work fine. Only the very first request returns null (no cache yet).
+        // Serve the stale cache as a fallback while the fresh request is in flight, but only if
+        // the cached items actually match what the user is currently typing. nvim-cmp filters
+        // client-side, so stale items from the same context (e.g. the user typed one more
+        // character) are fine. But stale items from a different context (e.g. cached `p*` items
+        // when the user is now at `pd.rea`) produce no matches and close the popup — worse than
+        // returning null.
         //
-        // Strip `textEdit` from each cached item before deserializing. Delegates like
-        // LanguageServer.jl embed an explicit character range in `textEdit` that was valid at the
-        // cursor position when the response was produced. When the cursor has since moved (the
-        // user typed another character), that stale range causes nvim-cmp to perform an
-        // out-of-bounds replacement (e.g. "round()n" instead of "round()"). Removing `textEdit`
-        // and promoting its `newText` to `insertText` makes nvim-cmp fall back to word-at-cursor
-        // insertion, which is always correct regardless of cursor position.
+        // Also strip `textEdit` before serving: delegates like LanguageServer.jl embed the exact
+        // cursor range in textEdit, which is stale when the cursor has moved. Without textEdit,
+        // nvim-cmp uses insertText with word-at-cursor replacement, which is always correct.
         if let Some(cached) = self.completion_cache.get(&language) {
-            tracing::info!("completion: serving cached result for {language} (fresh request in flight)");
-            let mut value = cached.clone();
-            strip_text_edits(&mut value);
-            let response: Option<CompletionResponse> =
-                serde_json::from_value(value).ok().flatten();
-            return Ok(response);
+            let word = self.documents.get(uri)
+                .map(|text| word_at_cursor(&text, line, character))
+                .unwrap_or_default();
+            if let Some(mut filtered) = filter_by_word(&cached, &word) {
+                tracing::info!(
+                    "completion: serving cached result for {language} (word={word:?}, fresh request in flight)"
+                );
+                strip_text_edits(&mut filtered);
+                let response: Option<CompletionResponse> =
+                    serde_json::from_value(filtered).ok().flatten();
+                return Ok(response);
+            }
+            tracing::info!(
+                "completion: cached result for {language} doesn't match word {word:?}, waiting for fresh request"
+            );
         }
 
         tracing::info!("completion: {language} first request in flight, returning null");
         Ok(None)
+    }
+}
+
+/// Extracts the trigger word at the given cursor position: the run of non-separator characters
+/// immediately before `character` on the given line. This is what nvim-cmp uses as the filter
+/// prefix when deciding which completion items to show.
+fn word_at_cursor(text: &str, line: u32, character: u32) -> String {
+    let line_text = text.lines().nth(line as usize).unwrap_or("");
+    let char_idx = (character as usize).min(line_text.len());
+    let prefix = &line_text[..char_idx];
+    const SEPARATORS: &[char] = &[
+        ' ', '\t', '.', '(', ')', '[', ']', '{', '}', ',', ':', '=', '"', '\'', '!', '+', '-',
+        '*', '/', '&', '|', '<', '>',
+    ];
+    prefix
+        .rfind(SEPARATORS)
+        .map(|i| &prefix[i + 1..])
+        .unwrap_or(prefix)
+        .to_string()
+}
+
+/// Returns a filtered copy of `value` (a raw CompletionResponse) keeping only items whose
+/// `insertText` or `label` starts with `word` (case-insensitive). Returns `None` when the word
+/// is non-empty and no items match, so the caller can fall back to returning null rather than
+/// showing a popup with irrelevant entries.
+fn filter_by_word(value: &serde_json::Value, word: &str) -> Option<serde_json::Value> {
+    if word.is_empty() {
+        return Some(value.clone());
+    }
+    let word_lower = word.to_lowercase();
+    let matches = |item: &serde_json::Value| -> bool {
+        let insert = item.get("insertText").and_then(|v| v.as_str()).unwrap_or("");
+        let label = item.get("label").and_then(|v| v.as_str()).unwrap_or("");
+        let text = if !insert.is_empty() { insert } else { label };
+        text.to_lowercase().starts_with(&word_lower)
+    };
+    if let Some(items) = value.as_array() {
+        let filtered: Vec<_> = items.iter().filter(|i| matches(i)).cloned().collect();
+        if filtered.is_empty() { None } else { Some(serde_json::Value::Array(filtered)) }
+    } else if let Some(items) = value.get("items").and_then(|v| v.as_array()) {
+        let filtered: Vec<_> = items.iter().filter(|i| matches(i)).cloned().collect();
+        if filtered.is_empty() {
+            None
+        } else {
+            let mut result = value.clone();
+            result["items"] = serde_json::Value::Array(filtered);
+            Some(result)
+        }
+    } else {
+        Some(value.clone())
     }
 }
 
