@@ -304,7 +304,16 @@ impl LanguageServer for LoomServer {
             {
                 let result = raw["result"].clone();
                 tracing::debug!("completion background result for {lang}: {result}");
-                cache.insert(lang, result);
+                // Don't cache empty results — they'd overwrite a valid previous cache and
+                // leave all subsequent requests returning null until the next fresh result.
+                let is_empty = result
+                    .get("items")
+                    .and_then(|v| v.as_array())
+                    .map_or(false, |a| a.is_empty())
+                    || result.as_array().map_or(false, |a| a.is_empty());
+                if !is_empty {
+                    cache.insert(lang, result);
+                }
             }
         });
 
@@ -319,17 +328,26 @@ impl LanguageServer for LoomServer {
         // cursor range in textEdit, which is stale when the cursor has moved. Without textEdit,
         // nvim-cmp uses insertText with word-at-cursor replacement, which is always correct.
         if let Some(cached) = self.completion_cache.get(&language) {
-            let word = self.documents.get(uri)
-                .map(|text| word_at_cursor(&text, line, character))
+            let (word, after_separator) = self.documents.get(uri)
+                .map(|text| {
+                    let w = word_at_cursor(&text, line, character);
+                    let sep = is_after_separator(&text, line, character);
+                    (w, sep)
+                })
                 .unwrap_or_default();
-            if let Some(mut filtered) = filter_by_word(&cached, &word) {
-                tracing::info!(
-                    "completion: serving cached result for {language} (word={word:?}, fresh request in flight)"
-                );
-                strip_text_edits(&mut filtered);
-                let response: Option<CompletionResponse> =
-                    serde_json::from_value(filtered).ok().flatten();
-                return Ok(response);
+            // After a separator like `.`, the completion context has changed (e.g. `pd.` needs
+            // attribute completions, not the cached module-level items). Don't serve stale cache
+            // here — the fresh request is already in flight.
+            if !after_separator {
+                if let Some(mut filtered) = filter_by_word(&cached, &word) {
+                    tracing::info!(
+                        "completion: serving cached result for {language} (word={word:?}, fresh request in flight)"
+                    );
+                    strip_text_edits(&mut filtered);
+                    let response: Option<CompletionResponse> =
+                        serde_json::from_value(filtered).ok().flatten();
+                    return Ok(response);
+                }
             }
             tracing::info!(
                 "completion: cached result for {language} doesn't match word {word:?}, waiting for fresh request"
@@ -339,6 +357,19 @@ impl LanguageServer for LoomServer {
         tracing::info!("completion: {language} first request in flight, returning null");
         Ok(None)
     }
+}
+
+/// Returns true when the character immediately before the cursor is a member-access separator
+/// (`.`), meaning the user just triggered attribute/method completion. In this case the word
+/// at cursor is empty and the cached items are from a different context, so the cache should
+/// not be served.
+fn is_after_separator(text: &str, line: u32, character: u32) -> bool {
+    let line_text = text.lines().nth(line as usize).unwrap_or("");
+    let char_idx = (character as usize).min(line_text.len());
+    if char_idx == 0 {
+        return false;
+    }
+    line_text[..char_idx].ends_with('.')
 }
 
 /// Extracts the trigger word at the given cursor position: the run of non-separator characters
