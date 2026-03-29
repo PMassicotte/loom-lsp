@@ -41,13 +41,16 @@ impl DelegateRegistry {
         if self.failed.contains(language) || self.delegates.contains_key(language) {
             return None;
         }
-        self.configs.get(language).map(|cfg| (cfg.server_command.clone(), self.root_uri.clone()))
+        self.configs
+            .get(language)
+            .map(|cfg| (cfg.server_command.clone(), self.root_uri.clone()))
     }
 
     /// Inserts an already-initialized delegate. Call this after initializing outside the lock.
     pub fn insert_ready(&mut self, language: String, delegate: DelegateServer) {
         tracing::info!("delegate ready for {language}");
-        self.delegates.insert(language, Arc::new(Mutex::new(delegate)));
+        self.delegates
+            .insert(language, Arc::new(Mutex::new(delegate)));
     }
 
     /// Marks a language as permanently failed so future requests are skipped.
@@ -80,11 +83,11 @@ impl DelegateRegistry {
 
         // Evict a dead delegate (get_if_alive already does this, but get_or_spawn must also
         // handle the case where it's called without a prior get_if_alive check).
-        if let Some(handle) = self.delegates.get(language) {
-            if !handle.lock().await.is_alive() {
-                tracing::warn!("delegate for {language} has died, re-spawning");
-                self.delegates.remove(language);
-            }
+        if let Some(handle) = self.delegates.get(language)
+            && !handle.lock().await.is_alive()
+        {
+            tracing::warn!("delegate for {language} has died, re-spawning");
+            self.delegates.remove(language);
         }
 
         if !self.delegates.contains_key(language) {
@@ -127,3 +130,4 @@ impl std::fmt::Debug for DelegateRegistry {
             .finish()
     }
 }
+
