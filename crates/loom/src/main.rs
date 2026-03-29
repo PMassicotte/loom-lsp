@@ -161,14 +161,8 @@ impl LanguageServer for LoomServer {
             {
                 let mut registry = self.registry.lock().await;
                 for vdoc in &vdocs {
-                    if registry.is_failed(&vdoc.language) {
-                        continue;
-                    }
-                    match registry.get_or_spawn(&vdoc.language).await {
-                        Ok(handle) => handles.push((handle, vdoc.uri.clone())),
-                        Err(e) => {
-                            tracing::warn!("failed to get delegate for {}: {e}", vdoc.language)
-                        }
+                    if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
+                        handles.push((handle, vdoc.uri.clone()));
                     }
                 }
             }
@@ -208,14 +202,10 @@ impl LanguageServer for LoomServer {
         {
             let mut registry = self.registry.lock().await;
             for vdoc in &vdocs {
-                if registry.is_failed(&vdoc.language) {
-                    continue;
-                }
-                match registry.get_or_spawn(&vdoc.language).await {
-                    Ok(handle) => {
-                        handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()))
-                    }
-                    Err(e) => tracing::warn!("failed to get delegate for {}: {e}", vdoc.language),
+                // Only send to delegates that are already alive — did_change should not trigger
+                // a slow re-spawn. A dead delegate will be re-spawned on the next completion.
+                if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
+                    handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()));
                 }
             }
         }
@@ -286,18 +276,8 @@ impl LanguageServer for LoomServer {
             handle.lock().await.sender()
         };
 
-        // Check the cache first — a previous background task may have stored the result after
-        // its tower-lsp task was cancelled (e.g. slow Julia LSP completing after the timeout).
-        if let Some((_, cached)) = self.completion_cache.remove(&language) {
-            tracing::info!("completion: serving cached result for {language}");
-            let response: Option<CompletionResponse> =
-                serde_json::from_value(cached).ok().flatten();
-            return Ok(response);
-        }
-
-        // No locks held from this point. The did_change handler already keeps the delegate
-        // document current — sending another didChange here would duplicate version numbers
-        // and corrupt the delegate LSP's document state.
+        // Always spawn a fresh LSP request in the background — it overwrites the cache on
+        // completion. neovim sends $/cancelRequest unpredictably so we never await here.
         let completion_params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: vdoc_uri },
@@ -310,10 +290,6 @@ impl LanguageServer for LoomServer {
         let params_value = serde_json::to_value(completion_params)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
-        // Spawn a detached task so the LSP request survives tower-lsp task cancellation.
-        // neovim sends $/cancelRequest unpredictably (200-300ms); waiting in the tower-lsp
-        // handler is a race we can't win reliably. Instead: always return null immediately,
-        // store the result in cache, and serve it on the next completion trigger.
         let cache = Arc::clone(&self.completion_cache);
         let lang = language.clone();
         tokio::spawn(async move {
@@ -327,10 +303,56 @@ impl LanguageServer for LoomServer {
             }
         });
 
-        tracing::info!(
-            "completion: {language} request in flight, returning null (result will be cached)"
-        );
+        // Return the last known result as a stale fallback so the popup stays open while the
+        // fresh request is in flight. nvim-cmp filters client-side, so results from a previous
+        // cursor position work fine. Only the very first request returns null (no cache yet).
+        //
+        // Strip `textEdit` from each cached item before deserializing. Delegates like
+        // LanguageServer.jl embed an explicit character range in `textEdit` that was valid at the
+        // cursor position when the response was produced. When the cursor has since moved (the
+        // user typed another character), that stale range causes nvim-cmp to perform an
+        // out-of-bounds replacement (e.g. "round()n" instead of "round()"). Removing `textEdit`
+        // and promoting its `newText` to `insertText` makes nvim-cmp fall back to word-at-cursor
+        // insertion, which is always correct regardless of cursor position.
+        if let Some(cached) = self.completion_cache.get(&language) {
+            tracing::info!("completion: serving cached result for {language} (fresh request in flight)");
+            let mut value = cached.clone();
+            strip_text_edits(&mut value);
+            let response: Option<CompletionResponse> =
+                serde_json::from_value(value).ok().flatten();
+            return Ok(response);
+        }
+
+        tracing::info!("completion: {language} first request in flight, returning null");
         Ok(None)
+    }
+}
+
+/// Strips `textEdit` from every completion item in a raw `CompletionResponse` JSON value,
+/// promoting `textEdit.newText` to `insertText` when not already set. This prevents stale
+/// position ranges (recorded when the response was first produced) from corrupting insertions
+/// when the cached result is served at a different cursor position.
+fn strip_text_edits(value: &mut serde_json::Value) {
+    let items = if let Some(arr) = value.as_array_mut() {
+        arr
+    } else if let Some(arr) = value.get_mut("items").and_then(|v| v.as_array_mut()) {
+        arr
+    } else {
+        return;
+    };
+    for item in items.iter_mut() {
+        let new_text = item
+            .get("textEdit")
+            .and_then(|te| te.get("newText").or_else(|| te.get("insert").and_then(|r| r.get("newText"))))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(obj) = item.as_object_mut() {
+            obj.remove("textEdit");
+            obj.remove("additionalTextEdits");
+            if let Some(text) = new_text {
+                obj.entry("insertText").or_insert_with(|| serde_json::Value::String(text));
+            }
+        }
     }
 }
 
