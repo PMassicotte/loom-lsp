@@ -16,6 +16,7 @@ pub struct TransportSender {
     stdin: Arc<AsyncMutex<ChildStdin>>,
     next_id: Arc<AtomicI64>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
+    alive: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl TransportSender {
@@ -47,6 +48,12 @@ pub(crate) struct LspTransport {
     child: tokio::process::Child,
     notifications: mpsc::Receiver<Value>,
     _reader: tokio::task::JoinHandle<()>,
+}
+
+impl LspTransport {
+    pub(crate) fn is_alive(&self) -> bool {
+        self.sender.alive.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 async fn recv_raw(stdout: &mut BufReader<ChildStdout>) -> Result<String> {
@@ -94,6 +101,7 @@ async fn reader_loop(
     stdin: Arc<AsyncMutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     notifications: mpsc::Sender<Value>,
+    alive: Arc<std::sync::atomic::AtomicBool>,
 ) {
     loop {
         let raw = match recv_raw(&mut stdout).await {
@@ -131,8 +139,8 @@ async fn reader_loop(
             let _ = notifications.try_send(msg);
         }
     }
-    // LSP server closed the connection — cancel all pending requests so callers don't block
-    // forever waiting for responses that will never arrive.
+    // LSP server closed — mark as dead, then cancel all pending requests.
+    alive.store(false, std::sync::atomic::Ordering::Relaxed);
     let drained: Vec<_> = pending.lock().unwrap().drain().map(|(_, tx)| tx).collect();
     drop(drained);
 }
@@ -172,18 +180,21 @@ impl LspTransport {
 
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let (notif_tx, notif_rx) = mpsc::channel(64);
+        let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
         let reader = tokio::spawn(reader_loop(
             BufReader::new(stdout),
             Arc::clone(&stdin),
             Arc::clone(&pending),
             notif_tx,
+            Arc::clone(&alive),
         ));
 
         let sender = TransportSender {
             stdin,
             next_id: Arc::new(AtomicI64::new(0)),
             pending,
+            alive,
         };
 
         Ok(Self {

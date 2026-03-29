@@ -30,6 +30,11 @@ impl DelegateServer {
         self.transport.sender()
     }
 
+    /// Returns false if the LSP server process has exited (broken pipe / EOF on stdout).
+    pub fn is_alive(&self) -> bool {
+        self.transport.is_alive()
+    }
+
     pub fn spawn(command: &[String]) -> Result<Self> {
         let transport = LspTransport::spawn(command)?;
 
