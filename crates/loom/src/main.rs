@@ -233,56 +233,34 @@ impl LanguageServer for LoomServer {
 
         let chunks = match self.chunks.get(uri) {
             Some(c) => c,
-            None => {
-                tracing::info!("completion: no chunks for {uri}");
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
-
         let language = match language_at_position(&chunks, line) {
             Some(l) => l.to_string(),
-            None => {
-                tracing::info!("completion: line {line} is not in a code chunk");
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
-
         let vdoc_uri = match self.virtual_documents.get(uri) {
             Some(vdocs) => match vdocs.iter().find(|v| v.language == language) {
                 Some(vdoc) => vdoc.uri.clone(),
-                None => {
-                    tracing::info!("completion: no virtual doc for language {language}");
-                    return Ok(None);
-                }
+                None => return Ok(None),
             },
-            None => {
-                tracing::info!("completion: no virtual documents for {uri}");
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
 
-        tracing::info!(
-            "forwarding completion to delegate: language={language} uri={vdoc_uri} line={line} char={character}"
-        );
+        tracing::info!("forwarding completion to delegate: language={language} line={line} char={character}");
 
-        // Get a cloneable sender — never spawn from inside a completion request. Spawning holds
-        // the registry lock for the full LSP initialize handshake (seconds), and neovim's
-        // $/cancelRequest will cancel this task before it finishes, so the spawn always fails
-        // and the delegate never gets inserted. did_open handles spawning; if the delegate
-        // isn't alive yet, return null and wait for did_open to finish.
+        // Never spawn delegates inside completion — did_open handles that.
         let sender: TransportSender = {
             let mut registry = self.registry.lock().await;
             match registry.get_if_alive(&language).await {
                 Some(handle) => handle.lock().await.sender(),
                 None => {
-                    tracing::info!("completion: delegate for {language} not ready yet, returning null");
+                    tracing::info!("completion: delegate for {language} not ready yet");
                     return Ok(None);
                 }
             }
         };
 
-        // Always spawn a fresh LSP request in the background — it overwrites the cache on
-        // completion. neovim sends $/cancelRequest unpredictably so we never await here.
         let completion_params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: vdoc_uri },
@@ -295,6 +273,27 @@ impl LanguageServer for LoomServer {
         let params_value = serde_json::to_value(completion_params)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
+        // Wait briefly for a fresh response. Fast LSPs (pyright ≈ 50ms) respond in time and
+        // return context-correct completions directly. Slow LSPs (Julia ≈ 2s) time out and
+        // we fall back to the stale cache + background task below.
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            sender.send_request("textDocument/completion", params_value.clone()),
+        )
+        .await
+        {
+            Ok(Ok(raw)) => {
+                let result = raw["result"].clone();
+                if !result.is_null() {
+                    tracing::info!("completion: fresh result for {language}");
+                    self.completion_cache.insert(language.clone(), result.clone());
+                    return Ok(serde_json::from_value(result).ok().flatten());
+                }
+            }
+            _ => {}
+        }
+
+        // Timed out or null — spawn background task to keep cache warm for next request.
         let cache = Arc::clone(&self.completion_cache);
         let lang = language.clone();
         tokio::spawn(async move {
@@ -303,73 +302,30 @@ impl LanguageServer for LoomServer {
                 .await
             {
                 let result = raw["result"].clone();
-                tracing::debug!("completion background result for {lang}: {result}");
-                // Don't cache empty results — they'd overwrite a valid previous cache and
-                // leave all subsequent requests returning null until the next fresh result.
-                let is_empty = result
-                    .get("items")
-                    .and_then(|v| v.as_array())
-                    .map_or(false, |a| a.is_empty())
-                    || result.as_array().map_or(false, |a| a.is_empty());
-                if !is_empty {
+                if !result.is_null() {
                     cache.insert(lang, result);
                 }
             }
         });
 
-        // Serve the stale cache as a fallback while the fresh request is in flight, but only if
-        // the cached items actually match what the user is currently typing. nvim-cmp filters
-        // client-side, so stale items from the same context (e.g. the user typed one more
-        // character) are fine. But stale items from a different context (e.g. cached `p*` items
-        // when the user is now at `pd.rea`) produce no matches and close the popup — worse than
-        // returning null.
-        //
-        // Also strip `textEdit` before serving: delegates like LanguageServer.jl embed the exact
-        // cursor range in textEdit, which is stale when the cursor has moved. Without textEdit,
-        // nvim-cmp uses insertText with word-at-cursor replacement, which is always correct.
+        // Serve stale cache as fallback (only useful for slow LSPs), filtered to items
+        // matching the current word so we don't show unrelated completions.
         if let Some(cached) = self.completion_cache.get(&language) {
-            let (word, after_separator) = self.documents.get(uri)
-                .map(|text| {
-                    let w = word_at_cursor(&text, line, character);
-                    let sep = is_after_separator(&text, line, character);
-                    (w, sep)
-                })
+            let word = self
+                .documents
+                .get(uri)
+                .map(|text| word_at_cursor(&text, line, character))
                 .unwrap_or_default();
-            // After a separator like `.`, the completion context has changed (e.g. `pd.` needs
-            // attribute completions, not the cached module-level items). Don't serve stale cache
-            // here — the fresh request is already in flight.
-            if !after_separator {
-                if let Some(mut filtered) = filter_by_word(&cached, &word) {
-                    tracing::info!(
-                        "completion: serving cached result for {language} (word={word:?}, fresh request in flight)"
-                    );
-                    strip_text_edits(&mut filtered);
-                    let response: Option<CompletionResponse> =
-                        serde_json::from_value(filtered).ok().flatten();
-                    return Ok(response);
-                }
+            if let Some(mut filtered) = filter_by_word(&cached, &word) {
+                strip_text_edits(&mut filtered);
+                tracing::info!("completion: stale cache for {language} (word={word:?})");
+                return Ok(serde_json::from_value(filtered).ok().flatten());
             }
-            tracing::info!(
-                "completion: cached result for {language} doesn't match word {word:?}, waiting for fresh request"
-            );
         }
 
-        tracing::info!("completion: {language} first request in flight, returning null");
+        tracing::info!("completion: no result for {language}");
         Ok(None)
     }
-}
-
-/// Returns true when the character immediately before the cursor is a member-access separator
-/// (`.`), meaning the user just triggered attribute/method completion. In this case the word
-/// at cursor is empty and the cached items are from a different context, so the cache should
-/// not be served.
-fn is_after_separator(text: &str, line: u32, character: u32) -> bool {
-    let line_text = text.lines().nth(line as usize).unwrap_or("");
-    let char_idx = (character as usize).min(line_text.len());
-    if char_idx == 0 {
-        return false;
-    }
-    line_text[..char_idx].ends_with('.')
 }
 
 /// Extracts the trigger word at the given cursor position: the run of non-separator characters
