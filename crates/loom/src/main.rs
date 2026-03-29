@@ -69,6 +69,9 @@ impl LanguageServer for LoomServer {
 
         let mut registry = self.registry.lock().await;
         for vdoc in &vdocs {
+            if registry.is_failed(&vdoc.language) {
+                continue;
+            }
             match registry.get_or_spawn(&vdoc.language).await {
                 Ok(delegate) => {
                     if let Err(e) = delegate
@@ -96,6 +99,9 @@ impl LanguageServer for LoomServer {
         if let Some((_, vdocs)) = self.virtual_documents.remove(&uri) {
             let mut registry = self.registry.lock().await;
             for vdoc in vdocs {
+                if registry.is_failed(&vdoc.language) {
+                    continue;
+                }
                 match registry.get_or_spawn(&vdoc.language).await {
                     Ok(delegate) => {
                         if let Err(e) = delegate.close_document(vdoc.uri).await {
@@ -136,6 +142,9 @@ impl LanguageServer for LoomServer {
 
         let mut registry = self.registry.lock().await;
         for vdoc in &vdocs {
+            if registry.is_failed(&vdoc.language) {
+                continue;
+            }
             match registry.get_or_spawn(&vdoc.language).await {
                 Ok(delegate) => {
                     if let Err(e) = delegate

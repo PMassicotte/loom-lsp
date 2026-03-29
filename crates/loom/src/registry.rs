@@ -24,6 +24,10 @@ impl DelegateRegistry {
         }
     }
 
+    pub fn is_failed(&self, language: &str) -> bool {
+        self.failed.contains(language)
+    }
+
     pub fn set_root_uri(&mut self, root_uri: Option<Url>) {
         self.root_uri = root_uri;
     }
