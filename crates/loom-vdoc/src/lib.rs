@@ -18,6 +18,32 @@ impl VirtualDocument {
     }
 }
 
+fn language_extension(language: &str) -> &str {
+    match language {
+        "python" => "py",
+        "r" => "R",
+        "javascript" => "js",
+        "typescript" => "ts",
+        "bash" | "sh" => "sh",
+        "rust" => "rs",
+        other => other,
+    }
+}
+
+fn virtual_uri(parent_uri: &lsp_types::Url, language: &str) -> lsp_types::Url {
+    let ext = language_extension(language);
+    let new_path = parent_uri
+        .path()
+        .rsplit_once('.')
+        .map(|(stem, _)| format!("{stem}.{ext}"))
+        .unwrap_or_else(|| format!("{}.{ext}", parent_uri.path()));
+
+    let mut uri = parent_uri.clone();
+    uri.set_path(&new_path);
+    uri.set_fragment(None);
+    uri
+}
+
 pub fn build_virtual_docs(
     chunks: &[CodeChunk],
     total_lines: u32,
@@ -50,8 +76,7 @@ pub fn build_virtual_docs(
             .map(|chunk| chunk.start_line..chunk.end_line + 1)
             .collect();
 
-        let mut uri = parent_uri.clone();
-        uri.set_fragment(Some(&language));
+        let uri = virtual_uri(parent_uri, &language);
 
         vdoc.push(VirtualDocument {
             language,

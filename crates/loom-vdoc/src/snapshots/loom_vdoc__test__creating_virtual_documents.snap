@@ -11,6 +11,17 @@ expression: vdoc
             7..10,
             23..27,
         ],
+        uri: Url {
+            scheme: "file",
+            cannot_be_a_base: false,
+            username: "",
+            password: None,
+            host: None,
+            port: None,
+            path: "/test/mixed_languages.py",
+            query: None,
+            fragment: None,
+        },
     },
     VirtualDocument {
         language: "r",
@@ -19,5 +30,16 @@ expression: vdoc
         live_ranges: [
             15..18,
         ],
+        uri: Url {
+            scheme: "file",
+            cannot_be_a_base: false,
+            username: "",
+            password: None,
+            host: None,
+            port: None,
+            path: "/test/mixed_languages.R",
+            query: None,
+            fragment: None,
+        },
     },
 ]

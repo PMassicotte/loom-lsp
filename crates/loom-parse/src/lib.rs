@@ -68,6 +68,15 @@ fn collect_chunks(node: tree_sitter::Node, source: &[u8], chunks: &mut Vec<CodeC
     }
 }
 
+/// Returns the language of the code chunk that contains `line`, or `None` if the line is in
+/// markdown/yaml/prose rather than a code chunk.
+pub fn language_at_position<'a>(chunks: &'a [CodeChunk], line: u32) -> Option<&'a str> {
+    chunks
+        .iter()
+        .find(|c| c.start_line <= line && line <= c.end_line)
+        .map(|c| c.language.as_str())
+}
+
 pub fn parse_qmd(source: &str) -> Result<Vec<CodeChunk>, ParseError> {
     let mut parser = Parser::new();
 
@@ -102,6 +111,31 @@ mod test {
                 $name
             ))
         };
+    }
+
+    #[test]
+    fn test_language_at_position() {
+        let chunks = vec![
+            super::CodeChunk {
+                language: "python".to_string(),
+                content: "x = 1".to_string(),
+                start_line: 2,
+                end_line: 4,
+            },
+            super::CodeChunk {
+                language: "r".to_string(),
+                content: "x <- 1".to_string(),
+                start_line: 8,
+                end_line: 10,
+            },
+        ];
+
+        assert_eq!(super::language_at_position(&chunks, 2), Some("python"));
+        assert_eq!(super::language_at_position(&chunks, 3), Some("python"));
+        assert_eq!(super::language_at_position(&chunks, 4), Some("python"));
+        assert_eq!(super::language_at_position(&chunks, 5), None); // prose
+        assert_eq!(super::language_at_position(&chunks, 9), Some("r"));
+        assert_eq!(super::language_at_position(&chunks, 0), None); // before any chunk
     }
 
     #[test]
