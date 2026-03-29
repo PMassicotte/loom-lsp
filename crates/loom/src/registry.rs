@@ -55,6 +55,19 @@ impl DelegateRegistry {
         self.failed.insert(language);
     }
 
+    /// Returns the existing delegate handle if present, without spawning. Returns None if not
+    /// yet spawned, failed, or dead (dead delegates are evicted so get_or_spawn can re-spawn).
+    pub async fn get_if_alive(&mut self, language: &str) -> Option<Arc<Mutex<DelegateServer>>> {
+        let handle = self.delegates.get(language)?;
+        if handle.lock().await.is_alive() {
+            Some(Arc::clone(handle))
+        } else {
+            tracing::warn!("delegate for {language} has died, evicting");
+            self.delegates.remove(language);
+            None
+        }
+    }
+
     /// Returns a handle to the delegate for `language`, spawning and initializing it first if it
     /// has not been started yet. The registry lock can be released after this call; use the
     /// returned `Arc<Mutex<DelegateServer>>` to perform operations on the delegate.
@@ -63,6 +76,15 @@ impl DelegateRegistry {
             return Err(anyhow::anyhow!(
                 "delegate for {language} previously failed to start"
             ));
+        }
+
+        // Evict a dead delegate (get_if_alive already does this, but get_or_spawn must also
+        // handle the case where it's called without a prior get_if_alive check).
+        if let Some(handle) = self.delegates.get(language) {
+            if !handle.lock().await.is_alive() {
+                tracing::warn!("delegate for {language} has died, re-spawning");
+                self.delegates.remove(language);
+            }
         }
 
         if !self.delegates.contains_key(language) {
