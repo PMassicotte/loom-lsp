@@ -26,6 +26,7 @@ fn language_extension(language: &str) -> &str {
         "typescript" => "ts",
         "bash" | "sh" => "sh",
         "rust" => "rs",
+        "julia" => "jl",
         other => other,
     }
 }
