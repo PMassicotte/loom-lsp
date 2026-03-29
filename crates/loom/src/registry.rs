@@ -98,10 +98,22 @@ impl DelegateRegistry {
 
             let cmd = config.server_command.join(" ");
 
+            let lang_root = self
+                .root_uri
+                .as_ref()
+                .and_then(|root| config.find_root(root.to_file_path().ok()?.as_path()))
+                .or_else(|| self.root_uri.as_ref().and_then(|u| u.to_file_path().ok()))
+                .unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+
             let mut delegate = DelegateServer::spawn(&config.server_command)
                 .map_err(|e| anyhow::anyhow!("failed to spawn `{cmd}`: {e}"))?;
 
-            if let Err(e) = delegate.initialize(self.root_uri.clone()).await {
+            if let Err(e) = delegate
+                .initialize(Url::from_file_path(&lang_root).ok())
+                .await
+            {
                 self.failed.insert(language.to_string());
                 return Err(anyhow::anyhow!("failed to initialize `{cmd}`: {e}"));
             }
@@ -130,4 +142,3 @@ impl std::fmt::Debug for DelegateRegistry {
             .finish()
     }
 }
-
