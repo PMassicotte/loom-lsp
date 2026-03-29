@@ -5,25 +5,23 @@
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-experimental-red.svg)]()
 
-Write [Quarto](https://quarto.org/) documents and get full IDE support for every language in your notebook at the same time.
+Write [Quarto](https://quarto.org/) documents and get IDE support for different languages in your notebook at the same time.
 
 ## The problem
 
-Quarto `.qmd` files are powerful: Python, R, markdown, and YAML all in one document. But your editor only understands one language at a time. You get autocomplete for Python _or_ R, never both. Diagnostics miss errors across languages. Hover docs disappear the moment you cross a code fence.
+Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...) all in one document. The issue is that the editor only understands one language at a time, in the case of a Quarto document, it usually defaults to markdown. This means no autocomplete, no diagnostics, no hover documentation, and no go-to-definition for your Python or R code.
 
-## What Loom does
+## What loom does
 
-Loom is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to the right server. For example, Python chunks to pyright, R chunks to the R language server, markdown to marksman. Your editor talks to one server; Loom handles the rest.
-
-The result: full autocomplete, diagnostics, hover documentation, and go-to-definition across your entire document, for every language, simultaneously.
+Loom is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to the right LSP server. For example, Python chunks to pyright or pylsp, R chunks to the R language server, markdown to marksman. Your editor talks to one server, loom handles the rest.
 
 ## Works with your existing tools
 
-Loom doesn't replace pyright or the R language server, it connects them. If you've already configured your Python or R environment, Loom picks it up automatically. No new tooling to learn, no duplicate configuration.
+Loom doesn't replace your favorite language LSP, it connects them within a single document. If you've already configured your Python or R environment, loom picks it up automatically. No new tooling to learn, no duplicate configuration.
 
-## Any editor, any workflow
+### Editors support
 
-Loom speaks standard LSP, so it works with Neovim, VS Code, Emacs, or any editor with LSP support. If your editor can run a language server, it can run Loom.
+Loom is designed to work with any editor that supports the Language Server Protocol (LSP). As the project evolves, it will be tested with popular editors such as Neovim, VS Code, Zed and more.
 
 ## Architecture
 
@@ -31,7 +29,7 @@ Loom speaks standard LSP, so it works with Neovim, VS Code, Emacs, or any editor
 flowchart LR
     Editor["Your Editor\n(Neovim, VS Code, …)"]
 
-    subgraph Loom
+    subgraph loom
         LS["Language Server\n(LSP endpoint)"]
         Parser["Quarto Parser\n(chunk boundaries)"]
         VDocs["Virtual Documents\n(per-language, line-padded)"]
@@ -49,11 +47,57 @@ flowchart LR
     Editor -- "LSP (stdio)" --> LS
     LS --> Parser
     Parser --> VDocs
-    VDocs --> DS1
-    VDocs --> DS2
+    VDocs --> Registry
     LS --> Registry
     Registry --> DS1
     Registry --> DS2
     DS1 -- "LSP (stdio)" --> Pyright
     DS2 -- "LSP (stdio)" --> RLS
+```
+
+## Supported LSP features
+
+- [ ] Code actions
+- [x] Code completion
+- [ ] Diagnostics
+- [ ] Document symbols
+- [ ] Find references
+- [ ] Formatting
+- [ ] Go-to-definition
+- [ ] Hover information
+- [ ] Rename symbol
+- [ ] Signature help
+- [x] Text synchronization
+- [ ] Workspace symbols
+
+## Loom configuration
+
+Loom looks for configuration files in the following order, with later entries taking precedence:
+
+1. `~/.config/loom/loom.toml` for global settings and language configurations
+2. `.loom.toml` in the current project directory which will override global settings for that project.
+
+For each language, you can specify the command to start the LSP server, the root markers to identify the project root, and any additional settings needed for that language. Here's an example configuration:
+
+```toml
+[server]
+log_level = "info"
+
+[languages.python]
+server_command = ["pyright-langserver", "--stdio"]
+root_markers = ["pyproject.toml", "setup.py"]
+settings = { python = { analysis = { typeCheckingMode = "basic" } } }
+
+[languages.r]
+server_command = ["R", "--slave", "-e", "languageserver::run()"]
+root_markers = [".Rproj", "DESCRIPTION"]
+
+[languages.markdown]
+server_command = ["marksman", "server"]
+
+[languages.yaml]
+server_command = ["yaml-language-server", "--stdio"]
+
+[languages.lua]
+server_command = ["lua-language-server"]
 ```
