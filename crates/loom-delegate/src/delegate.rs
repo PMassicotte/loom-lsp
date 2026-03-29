@@ -7,6 +7,7 @@
 use anyhow::Result;
 
 use crate::transport::LspTransport;
+pub use crate::transport::TransportSender;
 
 #[derive(Debug)]
 pub struct DelegateServer {
@@ -23,6 +24,12 @@ pub(crate) enum DelegateState {
 }
 
 impl DelegateServer {
+    /// Returns a cheaply cloneable sender handle. Callers can clone this and then release the
+    /// `DelegateServer` lock before awaiting long LSP responses (e.g. completions).
+    pub fn sender(&self) -> TransportSender {
+        self.transport.sender()
+    }
+
     pub fn spawn(command: &[String]) -> Result<Self> {
         let transport = LspTransport::spawn(command)?;
 
@@ -65,7 +72,7 @@ impl DelegateServer {
     }
 
     pub async fn open_document(
-        &mut self,
+        &self,
         uri: lsp_types::Url,
         language_id: &str,
         content: &str,
@@ -89,7 +96,7 @@ impl DelegateServer {
     }
 
     pub async fn update_document(
-        &mut self,
+        &self,
         uri: lsp_types::Url,
         version: i32,
         content: &str,
@@ -129,7 +136,7 @@ impl DelegateServer {
     }
 
     pub async fn completion(
-        &mut self,
+        &self,
         uri: lsp_types::Url,
         line: u32,
         character: u32,
@@ -152,7 +159,7 @@ impl DelegateServer {
         Ok(response["result"].clone())
     }
 
-    pub async fn close_document(&mut self, uri: lsp_types::Url) -> Result<()> {
+    pub async fn close_document(&self, uri: lsp_types::Url) -> Result<()> {
         let params = lsp_types::DidCloseTextDocumentParams {
             text_document: lsp_types::TextDocumentIdentifier { uri },
         };

@@ -9,12 +9,42 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use anyhow::Result;
 use serde_json::Value;
 
+/// Cheaply cloneable handle for sending LSP messages. Holds only Arc references so it can be
+/// cloned and used without holding any `DelegateServer` lock.
+#[derive(Clone, Debug)]
+pub struct TransportSender {
+    stdin: Arc<AsyncMutex<ChildStdin>>,
+    next_id: Arc<AtomicI64>,
+    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
+}
+
+impl TransportSender {
+    pub async fn send_message(&self, msg: Value) -> Result<()> {
+        let json = serde_json::to_string(&msg)?;
+        send_raw_to(&self.stdin, &json).await;
+        Ok(())
+    }
+
+    pub async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        self.send_message(request).await?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("request cancelled: LSP server closed"))
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct LspTransport {
-    stdin: Arc<AsyncMutex<ChildStdin>>,
+    sender: TransportSender,
     child: tokio::process::Child,
-    next_id: AtomicI64,
-    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     notifications: mpsc::Receiver<Value>,
     _reader: tokio::task::JoinHandle<()>,
 }
@@ -68,12 +98,19 @@ async fn reader_loop(
     loop {
         let raw = match recv_raw(&mut stdout).await {
             Ok(raw) => raw,
-            Err(_) => break,
+            Err(e) => {
+                tracing::warn!("reader_loop: LSP connection closed: {e}");
+                break;
+            }
         };
         let msg: Value = match serde_json::from_str(&raw) {
             Ok(msg) => msg,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!("reader_loop: failed to parse message: {e}");
+                continue;
+            }
         };
+        tracing::debug!("reader_loop recv: id={:?} method={:?}", msg.get("id"), msg.get("method"));
         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
             if msg.get("method").is_some() {
                 let response = serde_json::json!({
@@ -143,39 +180,30 @@ impl LspTransport {
             notif_tx,
         ));
 
-        Ok(Self {
+        let sender = TransportSender {
             stdin,
-            child,
-            next_id: AtomicI64::new(0),
+            next_id: Arc::new(AtomicI64::new(0)),
             pending,
+        };
+
+        Ok(Self {
+            sender,
+            child,
             notifications: notif_rx,
             _reader: reader,
         })
     }
 
-    async fn send_raw(&mut self, json: &str) -> Result<()> {
-        send_raw_to(&self.stdin, json).await;
-        Ok(())
+    pub(crate) fn sender(&self) -> TransportSender {
+        self.sender.clone()
     }
 
-    pub(crate) async fn send_message(&mut self, msg: Value) -> Result<()> {
-        let json = serde_json::to_string(&msg)?;
-        self.send_raw(&json).await
+    pub(crate) async fn send_message(&self, msg: Value) -> Result<()> {
+        self.sender.send_message(msg).await
     }
 
-    pub(crate) async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-        let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
-        self.send_message(request).await?;
-        rx.await
-            .map_err(|_| anyhow::anyhow!("request cancelled: LSP server closed"))
+    pub(crate) async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
+        self.sender.send_request(method, params).await
     }
 
     pub(crate) async fn next_notification(&mut self) -> Option<Value> {
