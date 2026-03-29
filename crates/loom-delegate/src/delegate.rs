@@ -128,6 +128,30 @@ impl DelegateServer {
         Ok(())
     }
 
+    pub async fn completion(
+        &mut self,
+        uri: lsp_types::Url,
+        line: u32,
+        character: u32,
+    ) -> Result<serde_json::Value> {
+        let params = lsp_types::CompletionParams {
+            text_document_position: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri },
+                position: lsp_types::Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+
+        let response = self
+            .transport
+            .send_request("textDocument/completion", serde_json::to_value(params)?)
+            .await?;
+
+        Ok(response["result"].clone())
+    }
+
     pub async fn close_document(&mut self, uri: lsp_types::Url) -> Result<()> {
         let params = lsp_types::DidCloseTextDocumentParams {
             text_document: lsp_types::TextDocumentIdentifier { uri },
@@ -165,5 +189,42 @@ mod tests {
 
         assert_eq!(server.state, DelegateState::Ready);
         assert!(server.server_capabilities.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires pyright-langserver in PATH"]
+    async fn test_completions_round_trip() {
+        let mut server =
+            DelegateServer::spawn(&["pyright-langserver".to_string(), "--stdio".to_string()])
+                .unwrap();
+
+        server.initialize(None).await.unwrap();
+
+        let uri = lsp_types::Url::parse("file:///tmp/virtual.py").unwrap();
+
+        // Pad with blank lines so the code lands on line 2, matching the completion position.
+        let content = "\n\nimport os\nos.path.";
+        server
+            .open_document(uri.clone(), "python", content)
+            .await
+            .unwrap();
+
+        let result = server.completion(uri, 3, 8).await.unwrap();
+
+        let labels: Vec<&str> = result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["label"].as_str())
+            .collect();
+
+        assert!(
+            labels.iter().any(|l| *l == "join"),
+            "expected 'join' in completions, got: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|l| *l == "exists"),
+            "expected 'exists' in completions, got: {labels:?}"
+        );
     }
 }

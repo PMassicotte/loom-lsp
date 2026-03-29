@@ -4,14 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use anyhow::Result;
 use serde_json::Value;
 
 #[derive(Debug)]
 pub(crate) struct LspTransport {
-    stdin: ChildStdin,
+    stdin: Arc<AsyncMutex<ChildStdin>>,
     child: tokio::process::Child,
     next_id: AtomicI64,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
@@ -47,8 +47,21 @@ async fn recv_raw(stdout: &mut BufReader<ChildStdout>) -> Result<String> {
     Ok(String::from_utf8(content_buffer)?)
 }
 
+async fn send_raw_to(stdin: &Arc<AsyncMutex<ChildStdin>>, json: &str) {
+    let msg = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+    let mut guard = stdin.lock().await;
+    if let Err(e) = guard.write_all(msg.as_bytes()).await {
+        tracing::warn!("failed to write to delegate stdin: {e}");
+        return;
+    }
+    if let Err(e) = guard.flush().await {
+        tracing::warn!("failed to flush delegate stdin: {e}");
+    }
+}
+
 async fn reader_loop(
     mut stdout: BufReader<ChildStdout>,
+    stdin: Arc<AsyncMutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     notifications: mpsc::Sender<Value>,
 ) {
@@ -62,14 +75,29 @@ async fn reader_loop(
             Err(_) => continue,
         };
         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-            let sender = pending.lock().unwrap().remove(&id);
-            if let Some(sender) = sender {
-                let _ = sender.send(msg);
+            if msg.get("method").is_some() {
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": null,
+                });
+                if let Ok(json) = serde_json::to_string(&response) {
+                    send_raw_to(&stdin, &json).await;
+                }
+            } else {
+                let sender = pending.lock().unwrap().remove(&id);
+                if let Some(sender) = sender {
+                    let _ = sender.send(msg);
+                }
             }
         } else {
-            let _ = notifications.send(msg).await;
+            let _ = notifications.try_send(msg);
         }
     }
+    // LSP server closed the connection — cancel all pending requests so callers don't block
+    // forever waiting for responses that will never arrive.
+    let drained: Vec<_> = pending.lock().unwrap().drain().map(|(_, tx)| tx).collect();
+    drop(drained);
 }
 
 impl LspTransport {
@@ -93,10 +121,12 @@ impl LspTransport {
             .stderr(std::process::Stdio::null())
             .spawn()?;
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("failed to open stdin"))?;
+        let stdin = Arc::new(AsyncMutex::new(
+            child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("failed to open stdin"))?,
+        ));
 
         let stdout = child
             .stdout
@@ -108,6 +138,7 @@ impl LspTransport {
 
         let reader = tokio::spawn(reader_loop(
             BufReader::new(stdout),
+            Arc::clone(&stdin),
             Arc::clone(&pending),
             notif_tx,
         ));
@@ -123,10 +154,7 @@ impl LspTransport {
     }
 
     async fn send_raw(&mut self, json: &str) -> Result<()> {
-        let content_length = json.len();
-        let message = format!("Content-Length: {content_length}\r\n\r\n{json}");
-        self.stdin.write_all(message.as_bytes()).await?;
-        self.stdin.flush().await?;
+        send_raw_to(&self.stdin, json).await;
         Ok(())
     }
 
@@ -177,16 +205,18 @@ mod tests {
     async fn test_framing_round_trip() {
         let mut transport = LspTransport::spawn(&["cat".to_string()]).unwrap();
 
-        // cat echoes back whatever we send, so send_request will receive the echoed request
-        // as its response (sufficient to verify framing correctness).
+        // cat echoes back whatever we send. The reader_loop treats the echoed request
+        // (id + method) as a server-initiated request and sends a null response; cat then echoes
+        // that null response back, which resolves the pending request. The round-trip verifies
+        // that LSP framing (Content-Length headers) is correct end-to-end.
         let response = transport
             .send_request("initialize", serde_json::json!({}))
             .await
             .unwrap();
 
         assert_eq!(response["jsonrpc"], "2.0");
-        assert_eq!(response["method"], "initialize");
         assert_eq!(response["id"], 0);
+        assert_eq!(response["result"], serde_json::Value::Null);
     }
 
     #[tokio::test]
@@ -238,4 +268,3 @@ mod tests {
         assert!(err.contains("not found in PATH"), "unexpected error: {err}");
     }
 }
-
