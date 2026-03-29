@@ -241,7 +241,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let log_file = std::fs::File::create("/tmp/loom.log")?;
+    let log_file = std::fs::File::create(std::env::temp_dir().join("loom.log"))?;
 
     tracing_subscriber::fmt()
         .with_writer(log_file)
