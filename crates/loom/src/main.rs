@@ -265,15 +265,20 @@ impl LanguageServer for LoomServer {
             "forwarding completion to delegate: language={language} uri={vdoc_uri} line={line} char={character}"
         );
 
-        // Get a cloneable sender — hold the per-delegate lock only long enough to clone it so
-        // that other tasks (e.g. did_change) can acquire the lock while we await the response.
+        // Get a cloneable sender — never spawn from inside a completion request. Spawning holds
+        // the registry lock for the full LSP initialize handshake (seconds), and neovim's
+        // $/cancelRequest will cancel this task before it finishes, so the spawn always fails
+        // and the delegate never gets inserted. did_open handles spawning; if the delegate
+        // isn't alive yet, return null and wait for did_open to finish.
         let sender: TransportSender = {
             let mut registry = self.registry.lock().await;
-            let handle = registry
-                .get_or_spawn(&language)
-                .await
-                .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
-            handle.lock().await.sender()
+            match registry.get_if_alive(&language).await {
+                Some(handle) => handle.lock().await.sender(),
+                None => {
+                    tracing::info!("completion: delegate for {language} not ready yet, returning null");
+                    return Ok(None);
+                }
+            }
         };
 
         // Always spawn a fresh LSP request in the background — it overwrites the cache on
