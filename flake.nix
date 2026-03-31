@@ -77,6 +77,7 @@
           nativeBuildInputs = [
             rustToolchain
             pkgs.cargo-insta
+            pkgs.pyright
           ];
         };
       }
