@@ -9,6 +9,8 @@ impl LoomServer {
         tracing::info!("Document closed: {}", uri);
 
         self.chunks.remove(&uri);
+        self.diagnostics_store.remove(&uri);
+        self.client.publish_diagnostics(uri.clone(), vec![], None).await;
 
         if let Some((_, vdocs)) = self.virtual_documents.remove(&uri) {
             let mut handles = Vec::new();
