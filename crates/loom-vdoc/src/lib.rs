@@ -36,8 +36,8 @@ fn virtual_uri(parent_uri: &lsp_types::Url, language: &str) -> lsp_types::Url {
     let new_path = parent_uri
         .path()
         .rsplit_once('.')
-        .map(|(stem, _)| format!("{stem}.{ext}"))
-        .unwrap_or_else(|| format!("{}.{ext}", parent_uri.path()));
+        .map(|(stem, _)| format!("{stem}.loom-vdoc.{ext}"))
+        .unwrap_or_else(|| format!("{}.loom-vdoc.{ext}", parent_uri.path()));
 
     let mut uri = parent_uri.clone();
     uri.set_path(&new_path);
