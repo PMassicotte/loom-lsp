@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         virtual_documents: DashMap::new(),
         registry: Mutex::new(DelegateRegistry::new(config.languages)),
         completion_cache: Arc::new(DashMap::new()),
+        diagnostics_store: DashMap::new(),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

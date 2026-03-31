@@ -7,14 +7,15 @@ mod initialize;
 use dashmap::DashMap;
 use loom_parse::CodeChunk;
 use loom_vdoc::VirtualDocument;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
     Url,
 };
+use tower_lsp::{LanguageServer, lsp_types};
 
 use crate::registry::DelegateRegistry;
 
@@ -28,6 +29,7 @@ pub(crate) struct LoomServer {
     /// via direct await; slow LSPs (Julia) populate it via background tasks. Used as fallback
     /// when the direct request times out.
     pub(crate) completion_cache: Arc<DashMap<String, serde_json::Value>>,
+    pub(crate) diagnostics_store: DashMap<Url, HashMap<String, Vec<lsp_types::Diagnostic>>>,
 }
 
 #[tower_lsp::async_trait]

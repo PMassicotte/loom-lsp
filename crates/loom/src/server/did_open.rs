@@ -66,6 +66,8 @@ impl LoomServer {
                         if let Some(mut rx) = rx {
                             let client = self.client.clone();
                             let vdocs_map = self.virtual_documents.clone();
+                            let diagnostics_store = self.diagnostics_store.clone();
+
                             tokio::spawn(async move {
                                 while let Some(notif) = rx.recv().await {
                                     if notif.method != "textDocument/publishDiagnostics" {
@@ -112,8 +114,22 @@ impl LoomServer {
                                         host_uri,
                                         filtered.len()
                                     );
+
+                                    diagnostics_store
+                                        .entry(host_uri.clone())
+                                        .or_default()
+                                        .insert(vdoc.language.clone(), filtered);
+
+                                    let all: Vec<tower_lsp::lsp_types::Diagnostic> =
+                                        diagnostics_store
+                                            .get(&host_uri)
+                                            .map(|entry| {
+                                                entry.values().flatten().cloned().collect()
+                                            })
+                                            .unwrap_or_default();
+
                                     client
-                                        .publish_diagnostics(host_uri, filtered, params.version)
+                                        .publish_diagnostics(host_uri, all, params.version)
                                         .await;
                                 }
                             });
