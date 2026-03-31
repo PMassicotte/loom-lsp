@@ -1,6 +1,6 @@
 use loom_parse::parse_qmd;
 use loom_vdoc::build_virtual_docs;
-use tower_lsp::lsp_types::DidOpenTextDocumentParams;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, Range};
 
 use super::LoomServer;
 
@@ -11,7 +11,28 @@ impl LoomServer {
 
         tracing::info!("Document opened: {} ({} bytes)", uri, text.len());
 
-        let parsed_chunks = parse_qmd(&text).unwrap();
+        let parsed_chunks = match parse_qmd(&text) {
+            Ok(chunks) => chunks,
+            Err(e) => {
+                tracing::error!("failed to parse {}: {e}", uri);
+                self.client
+                    .publish_diagnostics(
+                        uri.clone(),
+                        vec![Diagnostic {
+                            range: Range::default(),
+                            severity: Some(DiagnosticSeverity::WARNING),
+                            source: Some("loom".into()),
+                            message: format!("Loom failed to parse document: {e}"),
+                            ..Default::default()
+                        }],
+                        None,
+                    )
+                    .await;
+                self.chunks.insert(uri.clone(), Vec::new());
+                self.virtual_documents.insert(uri, Vec::new());
+                return;
+            }
+        };
         let vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
