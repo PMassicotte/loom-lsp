@@ -21,6 +21,8 @@ impl LoomServer {
             }),
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    // TODO: support incremental sync eventually when we have a better
+                    // understanding of the performance implications
                     TextDocumentSyncKind::FULL,
                 )),
                 completion_provider: Some(CompletionOptions::default()),
