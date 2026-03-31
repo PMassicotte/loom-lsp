@@ -70,7 +70,7 @@ fn collect_chunks(node: tree_sitter::Node, source: &[u8], chunks: &mut Vec<CodeC
 
 /// Returns the language of the code chunk that contains `line`, or `None` if the line is in
 /// markdown/yaml/prose rather than a code chunk.
-pub fn language_at_position<'a>(chunks: &'a [CodeChunk], line: u32) -> Option<&'a str> {
+pub fn language_at_position(chunks: &[CodeChunk], line: u32) -> Option<&str> {
     chunks
         .iter()
         .find(|c| c.start_line <= line && line <= c.end_line)
