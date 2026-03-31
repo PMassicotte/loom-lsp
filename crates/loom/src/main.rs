@@ -42,14 +42,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         load_config()?
     };
 
-    let server = LoomServer {
+    let (service, socket) = tower_lsp::LspService::new(|client| LoomServer {
+        client,
         chunks: DashMap::new(),
         virtual_documents: DashMap::new(),
         registry: Mutex::new(DelegateRegistry::new(config.languages)),
         completion_cache: Arc::new(DashMap::new()),
-    };
-
-    let (service, socket) = tower_lsp::LspService::new(|_client| server);
+    });
 
     Server::new(stdin, stdout, socket).serve(service).await;
 

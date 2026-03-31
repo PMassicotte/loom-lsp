@@ -6,7 +6,7 @@
 /// shutting down) and for storing the server's capabilities once it has been initialized.
 use anyhow::Result;
 
-use crate::transport::LspTransport;
+use crate::transport::{LspTransport, Notification};
 pub use crate::transport::TransportSender;
 
 #[derive(Debug)]
@@ -33,6 +33,12 @@ impl DelegateServer {
     /// Returns false if the LSP server process has exited (broken pipe / EOF on stdout).
     pub fn is_alive(&self) -> bool {
         self.transport.is_alive()
+    }
+
+    pub fn take_notification_rx(
+        &mut self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<Notification>> {
+        self.transport.take_notification_rx()
     }
 
     pub fn spawn(command: &[String]) -> Result<Self> {

@@ -16,6 +16,7 @@ impl LoomServer {
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
         self.chunks.insert(uri.clone(), parsed_chunks);
+        self.virtual_documents.insert(uri, vdocs.clone());
 
         // Collect which languages need a new delegate spawned. Hold the registry lock only long
         // enough for this check not during the multi-second LSP initialize handshake.
@@ -59,7 +60,65 @@ impl LoomServer {
             let mut registry = self.registry.lock().await;
             for (lang, result) in init_results {
                 match result {
-                    Ok(delegate) => registry.insert_ready(lang, delegate),
+                    Ok(mut delegate) => {
+                        let rx = delegate.take_notification_rx();
+                        registry.insert_ready(lang, delegate);
+                        if let Some(mut rx) = rx {
+                            let client = self.client.clone();
+                            let vdocs_map = self.virtual_documents.clone();
+                            tokio::spawn(async move {
+                                while let Some(notif) = rx.recv().await {
+                                    if notif.method != "textDocument/publishDiagnostics" {
+                                        continue;
+                                    }
+
+                                    let params: tower_lsp::lsp_types::PublishDiagnosticsParams =
+                                        match serde_json::from_value(notif.params) {
+                                            Ok(p) => p,
+                                            Err(e) => {
+                                                tracing::warn!("bad diagnostics params: {e}");
+                                                continue;
+                                            }
+                                        };
+
+                                    // Reverse-map: find which .qmd owns this virtual doc URI
+                                    let found = vdocs_map.iter().find_map(|entry| {
+                                        let host = entry.key().clone();
+                                        entry
+                                            .value()
+                                            .iter()
+                                            .find(|vdoc| vdoc.uri == params.uri)
+                                            .map(|vdoc| (host, vdoc.clone()))
+                                    });
+
+                                    let (host_uri, vdoc) = match found {
+                                        Some(pair) => pair,
+                                        None => {
+                                            tracing::debug!("no host doc for {}", params.uri);
+                                            continue;
+                                        }
+                                    };
+
+                                    // Filter out diagnostics on padding lines
+                                    let filtered: Vec<tower_lsp::lsp_types::Diagnostic> = params
+                                        .diagnostics
+                                        .into_iter()
+                                        .filter(|d| vdoc.is_live(d.range.start.line))
+                                        .collect();
+
+                                    tracing::info!(
+                                        "publishDiagnostics: {} -> {} ({} items)",
+                                        params.uri,
+                                        host_uri,
+                                        filtered.len()
+                                    );
+                                    client
+                                        .publish_diagnostics(host_uri, filtered, params.version)
+                                        .await;
+                                }
+                            });
+                        }
+                    }
                     Err(()) => registry.mark_failed(lang),
                 }
             }
@@ -78,6 +137,7 @@ impl LoomServer {
                 }
             }
         }
+
         for (handle, vdoc_uri, language, content) in handles {
             if let Err(e) = handle
                 .lock()
@@ -88,7 +148,5 @@ impl LoomServer {
                 tracing::warn!("failed to open virtual doc on delegate: {e}");
             }
         }
-
-        self.virtual_documents.insert(uri, vdocs);
     }
 }

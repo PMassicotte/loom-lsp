@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout, Command};
@@ -17,6 +18,11 @@ pub struct TransportSender {
     next_id: Arc<AtomicI64>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
+}
+
+pub struct Notification {
+    pub method: String,
+    pub params: Value,
 }
 
 impl TransportSender {
@@ -47,11 +53,16 @@ pub(crate) struct LspTransport {
     sender: TransportSender,
     child: tokio::process::Child,
     _reader: tokio::task::JoinHandle<()>,
+    notification_rx: Option<mpsc::UnboundedReceiver<Notification>>,
 }
 
 impl LspTransport {
     pub(crate) fn is_alive(&self) -> bool {
         self.sender.alive.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn take_notification_rx(&mut self) -> Option<mpsc::UnboundedReceiver<Notification>> {
+        self.notification_rx.take()
     }
 }
 
@@ -95,25 +106,38 @@ async fn send_raw_to(stdin: &Arc<AsyncMutex<ChildStdin>>, json: &str) {
     }
 }
 
+/// Continuously reads JSON-RPC messages from the delegate's stdout and dispatches them.
+///
+/// LSP messages come in three flavors, distinguished by the presence of `id` and `method`:
+///   - Response (has `id`, no `method`):  resolves a pending request via its oneshot sender
+///   - Server-initiated request (has `id` AND `method`):  replied with null to unblock the delegate
+///   - Notification (has `method`, no `id`):  forwarded via the notification channel
+///
+/// When the delegate's stdout closes (EOF / broken pipe), the loop breaks and marks the
+/// transport as dead so callers know to stop sending.
 async fn reader_loop(
     mut stdout: BufReader<ChildStdout>,
     stdin: Arc<AsyncMutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
+    notification_tx: tokio::sync::mpsc::UnboundedSender<Notification>,
 ) {
     loop {
+        // Block until the delegate sends us a full LSP message (Content-Length header + body).
         let raw = match recv_raw(&mut stdout).await {
             Ok(raw) => raw,
             Err(e) => {
                 tracing::warn!("reader_loop: LSP connection closed: {e}");
-                break;
+                break; // delegate process exited or pipe broke, exit the loop
             }
         };
+
+        // Parse the raw JSON string into a serde_json::Value we can inspect.
         let msg: Value = match serde_json::from_str(&raw) {
             Ok(msg) => msg,
             Err(e) => {
                 tracing::debug!("reader_loop: failed to parse message: {e}");
-                continue;
+                continue; // Malformed message from delegate
             }
         };
         tracing::debug!(
@@ -121,28 +145,41 @@ async fn reader_loop(
             msg.get("id"),
             msg.get("method")
         );
+
+        // Dispatch based on message shape:
         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
             if msg.get("method").is_some() {
-                // Server-initiated request, respond with null so the delegate doesn't stall.
+                // Case 1: Server-initiated request (id + method).
+                // Some LSPs send requests like `window/workDoneProgress/create`.
+                // We don't handle them, just reply with null so the delegate doesn't hang
+                // waiting for a response.
                 let response = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": null });
                 if let Ok(json) = serde_json::to_string(&response) {
                     send_raw_to(&stdin, &json).await;
                 }
             } else {
+                // Case 2: Response to one of our requests (id, no method).
+                // Look up the oneshot sender we stashed when we sent the request, and
+                // deliver the full response through it. The caller is awaiting the rx end.
                 let sender = pending.lock().unwrap().remove(&id);
                 if let Some(sender) = sender {
                     let _ = sender.send(msg);
                 }
             }
+        } else if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+            // Case 3: Notification (method, no id), e.g. textDocument/publishDiagnostics.
+            let params = msg.get("params").cloned().unwrap_or(Value::Null);
+            tracing::info!("notification: {}", method);
+            let _ = notification_tx.send(Notification {
+                method: method.to_string(),
+                params,
+            });
         }
-        // Notifications (no id) are ignored, loom doesn't act on them.
     }
 
-    // LSP server closed mark as dead, then cancel all pending requests.
     alive.store(false, std::sync::atomic::Ordering::Relaxed);
 
     let drained: Vec<_> = pending.lock().unwrap().drain().map(|(_, tx)| tx).collect();
-
     drop(drained);
 }
 
@@ -182,11 +219,14 @@ impl LspTransport {
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
+        let (notification_tx, notification_rx) = tokio::sync::mpsc::unbounded_channel();
+
         let reader = tokio::spawn(reader_loop(
             BufReader::new(stdout),
             Arc::clone(&stdin),
             Arc::clone(&pending),
             Arc::clone(&alive),
+            notification_tx.clone(),
         ));
 
         let sender = TransportSender {
@@ -200,6 +240,7 @@ impl LspTransport {
             sender,
             child,
             _reader: reader,
+            notification_rx: Some(notification_rx),
         })
     }
 

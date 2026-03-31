@@ -12,13 +12,15 @@ use tokio::sync::Mutex;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, Url,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
+    Url,
 };
 
 use crate::registry::DelegateRegistry;
 
 #[derive(Debug)]
 pub(crate) struct LoomServer {
+    pub(crate) client: tower_lsp::Client,
     pub(crate) chunks: DashMap<Url, Vec<CodeChunk>>,
     pub(crate) virtual_documents: DashMap<Url, Vec<VirtualDocument>>,
     pub(crate) registry: Mutex<DelegateRegistry>,
@@ -58,5 +60,11 @@ impl LanguageServer for LoomServer {
         params: CompletionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
         self.handle_completion(params).await
+    }
+
+    async fn initialized(&self, _params: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "Loom server initialized")
+            .await;
     }
 }
