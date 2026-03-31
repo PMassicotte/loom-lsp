@@ -237,11 +237,12 @@ mod tests {
             .collect();
 
         assert!(
-            labels.iter().any(|l| *l == "join"),
+            labels.contains(&"join"),
             "expected 'join' in completions, got: {labels:?}"
         );
+
         assert!(
-            labels.iter().any(|l| *l == "exists"),
+            labels.contains(&"exists"),
             "expected 'exists' in completions, got: {labels:?}"
         );
     }
