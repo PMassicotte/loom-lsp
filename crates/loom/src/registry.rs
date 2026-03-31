@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
 use loom_config::LanguageConfig;
 use loom_delegate::DelegateServer;
 use tokio::sync::Mutex;
@@ -69,61 +68,6 @@ impl DelegateRegistry {
             self.delegates.remove(language);
             None
         }
-    }
-
-    /// Returns a handle to the delegate for `language`, spawning and initializing it first if it
-    /// has not been started yet. The registry lock can be released after this call; use the
-    /// returned `Arc<Mutex<DelegateServer>>` to perform operations on the delegate.
-    pub async fn get_or_spawn(&mut self, language: &str) -> Result<Arc<Mutex<DelegateServer>>> {
-        if self.failed.contains(language) {
-            return Err(anyhow::anyhow!(
-                "delegate for {language} previously failed to start"
-            ));
-        }
-
-        // Evict a dead delegate (get_if_alive already does this, but get_or_spawn must also
-        // handle the case where it's called without a prior get_if_alive check).
-        if let Some(handle) = self.delegates.get(language)
-            && !handle.lock().await.is_alive()
-        {
-            tracing::warn!("delegate for {language} has died, re-spawning");
-            self.delegates.remove(language);
-        }
-
-        if !self.delegates.contains_key(language) {
-            let config = self
-                .configs
-                .get(language)
-                .ok_or_else(|| anyhow::anyhow!("no config for language: {language}"))?;
-
-            let cmd = config.server_command.join(" ");
-
-            let lang_root = self
-                .root_uri
-                .as_ref()
-                .and_then(|root| config.find_root(root.to_file_path().ok()?.as_path()))
-                .or_else(|| self.root_uri.as_ref().and_then(|u| u.to_file_path().ok()))
-                .unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                });
-
-            let mut delegate = DelegateServer::spawn(&config.server_command)
-                .map_err(|e| anyhow::anyhow!("failed to spawn `{cmd}`: {e}"))?;
-
-            if let Err(e) = delegate
-                .initialize(Url::from_file_path(&lang_root).ok())
-                .await
-            {
-                self.failed.insert(language.to_string());
-                return Err(anyhow::anyhow!("failed to initialize `{cmd}`: {e}"));
-            }
-
-            tracing::info!("delegate ready for {language}");
-            self.delegates
-                .insert(language.to_string(), Arc::new(Mutex::new(delegate)));
-        }
-
-        Ok(Arc::clone(self.delegates.get(language).unwrap()))
     }
 
     pub async fn shutdown_all(&mut self) {

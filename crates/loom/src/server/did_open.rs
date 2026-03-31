@@ -18,8 +18,7 @@ impl LoomServer {
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri, vdocs.clone());
 
-        // Collect which languages need a new delegate spawned. Hold the registry lock only long
-        // enough for this check not during the multi-second LSP initialize handshake.
+        // Collect which languages need a new delegate spawned.
         let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
             let registry = self.registry.lock().await;
             vdocs
@@ -32,134 +31,141 @@ impl LoomServer {
                 .collect()
         };
 
-        // Initialize all needed delegates concurrently, with no lock held.
-        let init_futs = to_spawn
-            .into_iter()
-            .map(|(lang, cmd, root_uri)| async move {
+        // Spawn each delegate init as an independent background task so fast delegates
+        // (pyright ~200ms) don't wait for slow ones (Julia ~5s).
+        for (lang, cmd, root_uri) in to_spawn {
+            let registry = self.registry.clone();
+            let client = self.client.clone();
+            let vdocs_map = self.virtual_documents.clone();
+            let diagnostics_store = self.diagnostics_store.clone();
+            let vdocs = vdocs.clone();
+
+            tokio::spawn(async move {
                 let cmd_str = cmd.join(" ");
                 let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
                     Ok(d) => d,
                     Err(e) => {
                         tracing::warn!("failed to spawn `{cmd_str}`: {e}");
-                        return (lang, Err(()));
+                        registry.lock().await.mark_failed(lang);
+                        return;
                     }
                 };
-                match delegate.initialize(root_uri).await {
-                    Ok(()) => (lang, Ok(delegate)),
-                    Err(e) => {
-                        tracing::warn!("failed to initialize `{cmd_str}`: {e}");
-                        (lang, Err(()))
+                if let Err(e) = delegate.initialize(root_uri).await {
+                    tracing::warn!("failed to initialize `{cmd_str}`: {e}");
+                    registry.lock().await.mark_failed(lang);
+                    return;
+                }
+
+                // Take notification rx before inserting into registry.
+                let rx = delegate.take_notification_rx();
+
+                // Insert into registry and send didOpen for matching vdocs.
+                {
+                    let mut reg = registry.lock().await;
+                    reg.insert_ready(lang.clone(), delegate);
+
+                    // Open virtual docs for this language on the new delegate.
+                    if let Some(handle) = reg.get_if_alive(&lang).await {
+                        for vdoc in &vdocs {
+                            if vdoc.language == lang
+                                && let Err(e) = handle
+                                    .lock()
+                                    .await
+                                    .open_document(vdoc.uri.clone(), &vdoc.language, &vdoc.content)
+                                    .await
+                            {
+                                tracing::warn!("failed to open virtual doc on delegate: {e}");
+                            }
+                        }
                     }
                 }
-            });
-        let init_results = futures::future::join_all(init_futs).await;
 
-        // Insert results brief lock per insert.
+                // Spawn notification listener for diagnostics.
+                if let Some(mut rx) = rx {
+                    tokio::spawn(async move {
+                        while let Some(notif) = rx.recv().await {
+                            if notif.method != "textDocument/publishDiagnostics" {
+                                continue;
+                            }
+
+                            let params: tower_lsp::lsp_types::PublishDiagnosticsParams =
+                                match serde_json::from_value(notif.params) {
+                                    Ok(p) => p,
+                                    Err(e) => {
+                                        tracing::warn!("bad diagnostics params: {e}");
+                                        continue;
+                                    }
+                                };
+
+                            // Reverse-map: find which .qmd owns this virtual doc URI
+                            let found = vdocs_map.iter().find_map(|entry| {
+                                let host = entry.key().clone();
+                                entry
+                                    .value()
+                                    .iter()
+                                    .find(|vdoc| vdoc.uri == params.uri)
+                                    .map(|vdoc| (host, vdoc.clone()))
+                            });
+
+                            let (host_uri, vdoc) = match found {
+                                Some(pair) => pair,
+                                None => {
+                                    tracing::debug!("no host doc for {}", params.uri);
+                                    continue;
+                                }
+                            };
+
+                            // Filter out diagnostics on padding lines
+                            let filtered: Vec<tower_lsp::lsp_types::Diagnostic> = params
+                                .diagnostics
+                                .into_iter()
+                                .filter(|d| vdoc.is_live(d.range.start.line))
+                                .collect();
+
+                            tracing::info!(
+                                "publishDiagnostics: {} -> {} lang={} ({} filtered)",
+                                params.uri,
+                                host_uri,
+                                vdoc.language,
+                                filtered.len()
+                            );
+
+                            diagnostics_store
+                                .entry(host_uri.clone())
+                                .or_default()
+                                .insert(vdoc.language.clone(), filtered);
+
+                            let all: Vec<tower_lsp::lsp_types::Diagnostic> = diagnostics_store
+                                .get(&host_uri)
+                                .map(|entry| entry.values().flatten().cloned().collect())
+                                .unwrap_or_default();
+
+                            tracing::info!("publishing merged: {} ({} total)", host_uri, all.len());
+                            client.publish_diagnostics(host_uri, all, None).await;
+                        }
+                    });
+                }
+            });
+        }
+
+        // For languages that already have a running delegate, send didOpen immediately.
         let mut handles = Vec::new();
         {
             let mut registry = self.registry.lock().await;
-            for (lang, result) in init_results {
-                match result {
-                    Ok(mut delegate) => {
-                        let rx = delegate.take_notification_rx();
-                        registry.insert_ready(lang, delegate);
-                        if let Some(mut rx) = rx {
-                            let client = self.client.clone();
-                            let vdocs_map = self.virtual_documents.clone();
-                            let diagnostics_store = self.diagnostics_store.clone();
-
-                            tokio::spawn(async move {
-                                while let Some(notif) = rx.recv().await {
-                                    if notif.method != "textDocument/publishDiagnostics" {
-                                        continue;
-                                    }
-
-                                    let params: tower_lsp::lsp_types::PublishDiagnosticsParams =
-                                        match serde_json::from_value(notif.params) {
-                                            Ok(p) => p,
-                                            Err(e) => {
-                                                tracing::warn!("bad diagnostics params: {e}");
-                                                continue;
-                                            }
-                                        };
-
-                                    // Reverse-map: find which .qmd owns this virtual doc URI
-                                    let found = vdocs_map.iter().find_map(|entry| {
-                                        let host = entry.key().clone();
-                                        entry
-                                            .value()
-                                            .iter()
-                                            .find(|vdoc| vdoc.uri == params.uri)
-                                            .map(|vdoc| (host, vdoc.clone()))
-                                    });
-
-                                    let (host_uri, vdoc) = match found {
-                                        Some(pair) => pair,
-                                        None => {
-                                            tracing::debug!("no host doc for {}", params.uri);
-                                            continue;
-                                        }
-                                    };
-
-                                    // Filter out diagnostics on padding lines
-                                    let filtered: Vec<tower_lsp::lsp_types::Diagnostic> = params
-                                        .diagnostics
-                                        .into_iter()
-                                        .filter(|d| vdoc.is_live(d.range.start.line))
-                                        .collect();
-
-                                    tracing::info!(
-                                        "publishDiagnostics: {} -> {} lang={} ({} filtered)",
-                                        params.uri,
-                                        host_uri,
-                                        vdoc.language,
-                                        filtered.len()
-                                    );
-
-                                    diagnostics_store
-                                        .entry(host_uri.clone())
-                                        .or_default()
-                                        .insert(vdoc.language.clone(), filtered);
-
-                                    let all: Vec<tower_lsp::lsp_types::Diagnostic> =
-                                        diagnostics_store
-                                            .get(&host_uri)
-                                            .map(|entry| {
-                                                entry.values().flatten().cloned().collect()
-                                            })
-                                            .unwrap_or_default();
-
-                                    tracing::info!(
-                                        "publishing merged: {} ({} total)",
-                                        host_uri,
-                                        all.len()
-                                    );
-                                    client
-                                        .publish_diagnostics(host_uri, all, None)
-                                        .await;
-                                }
-                            });
-                        }
-                    }
-                    Err(()) => registry.mark_failed(lang),
-                }
-            }
             for vdoc in &vdocs {
                 if registry.is_failed(&vdoc.language) {
                     continue;
                 }
-                match registry.get_or_spawn(&vdoc.language).await {
-                    Ok(handle) => handles.push((
+                if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
+                    handles.push((
                         handle,
                         vdoc.uri.clone(),
                         vdoc.language.clone(),
                         vdoc.content.clone(),
-                    )),
-                    Err(e) => tracing::warn!("failed to get delegate for {}: {e}", vdoc.language),
+                    ))
                 }
             }
         }
-
         for (handle, vdoc_uri, language, content) in handles {
             if let Err(e) = handle
                 .lock()

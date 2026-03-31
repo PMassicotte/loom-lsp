@@ -24,7 +24,7 @@ pub(crate) struct LoomServer {
     pub(crate) client: tower_lsp::Client,
     pub(crate) chunks: DashMap<Url, Vec<CodeChunk>>,
     pub(crate) virtual_documents: DashMap<Url, Vec<VirtualDocument>>,
-    pub(crate) registry: Mutex<DelegateRegistry>,
+    pub(crate) registry: Arc<Mutex<DelegateRegistry>>,
     /// Caches the most recent completion result per language. Fast LSPs (pyright) populate this
     /// via direct await; slow LSPs (Julia) populate it via background tasks. Used as fallback
     /// when the direct request times out.

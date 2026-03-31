@@ -6,8 +6,8 @@
 /// shutting down) and for storing the server's capabilities once it has been initialized.
 use anyhow::Result;
 
-use crate::transport::{LspTransport, Notification};
 pub use crate::transport::TransportSender;
+use crate::transport::{LspTransport, Notification};
 
 #[derive(Debug)]
 pub struct DelegateServer {

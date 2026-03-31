@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client,
         chunks: DashMap::new(),
         virtual_documents: DashMap::new(),
-        registry: Mutex::new(DelegateRegistry::new(config.languages)),
+        registry: Arc::new(Mutex::new(DelegateRegistry::new(config.languages))),
         completion_cache: Arc::new(DashMap::new()),
         diagnostics_store: Arc::new(DashMap::new()),
     });
