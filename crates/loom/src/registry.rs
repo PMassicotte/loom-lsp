@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::Url;
 /// on first use so that we don't start servers for languages that never appear in the workspace.
 pub struct DelegateRegistry {
     delegates: HashMap<String, Arc<Mutex<DelegateServer>>>,
-    failed: std::collections::HashSet<String>,
+    failed: HashMap<String, u32>,
     configs: HashMap<String, LanguageConfig>,
     root_uri: Option<Url>,
 }
@@ -19,14 +19,14 @@ impl DelegateRegistry {
     pub fn new(configs: HashMap<String, LanguageConfig>) -> Self {
         Self {
             delegates: HashMap::new(),
-            failed: std::collections::HashSet::new(),
+            failed: HashMap::new(),
             configs,
             root_uri: None,
         }
     }
 
     pub fn is_failed(&self, language: &str) -> bool {
-        self.failed.contains(language)
+        self.failed.get(language).copied().unwrap_or(0) >= 3
     }
 
     pub fn set_root_uri(&mut self, root_uri: Option<Url>) {
@@ -37,7 +37,7 @@ impl DelegateRegistry {
     /// not failed), or `None` if it already has a delegate or is in the failed set. Used by
     /// callers that want to initialize delegates outside the registry lock.
     pub fn spawn_params(&self, language: &str) -> Option<(Vec<String>, Option<Url>)> {
-        if self.failed.contains(language) || self.delegates.contains_key(language) {
+        if self.is_failed(language) || self.delegates.contains_key(language) {
             return None;
         }
         self.configs
@@ -52,9 +52,10 @@ impl DelegateRegistry {
             .insert(language, Arc::new(Mutex::new(delegate)));
     }
 
-    /// Marks a language as permanently failed so future requests are skipped.
+    /// Increments the failure count for a language. After 3 failures, the language is
+    /// considered permanently failed and no more spawn attempts will be made.
     pub fn mark_failed(&mut self, language: String) {
-        self.failed.insert(language);
+        *self.failed.entry(language).or_insert(0) += 1;
     }
 
     /// Returns the existing delegate handle if present, without spawning. Returns None if not

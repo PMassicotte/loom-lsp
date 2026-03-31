@@ -3,6 +3,7 @@ mod did_change;
 mod did_close;
 mod did_open;
 mod initialize;
+mod spawn_delegate;
 
 use dashmap::DashMap;
 use loom_parse::CodeChunk;

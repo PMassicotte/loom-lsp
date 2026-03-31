@@ -3,6 +3,7 @@ use loom_vdoc::build_virtual_docs;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, Range};
 
 use super::LoomServer;
+use super::spawn_delegate::spawn_delegate;
 
 impl LoomServer {
     pub(crate) async fn handle_did_change(&self, params: DidChangeTextDocumentParams) {
@@ -47,12 +48,37 @@ impl LoomServer {
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri.clone(), vdocs.clone());
 
+        // Spawn delegates for languages that are missing or dead.
+        let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
+            let registry = self.registry.lock().await;
+            vdocs
+                .iter()
+                .filter_map(|vdoc| {
+                    registry
+                        .spawn_params(&vdoc.language)
+                        .map(|(cmd, root_uri)| (vdoc.language.clone(), cmd, root_uri))
+                })
+                .collect()
+        };
+
+        for (lang, cmd, root_uri) in to_spawn {
+            spawn_delegate(
+                lang,
+                cmd,
+                root_uri,
+                vdocs.clone(),
+                self.registry.clone(),
+                self.client.clone(),
+                self.virtual_documents.clone(),
+                self.diagnostics_store.clone(),
+            );
+        }
+
+        // Update already-running delegates.
         let mut handles = Vec::new();
         {
             let mut registry = self.registry.lock().await;
             for vdoc in &vdocs {
-                // Only send to delegates that are already alive, did_change should not trigger
-                // a slow re-spawn. A dead delegate will be re-spawned on the next completion.
                 if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
                     handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()));
                 }

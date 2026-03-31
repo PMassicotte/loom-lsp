@@ -3,6 +3,7 @@ use loom_vdoc::build_virtual_docs;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, Range};
 
 use super::LoomServer;
+use super::spawn_delegate::spawn_delegate;
 
 impl LoomServer {
     pub(crate) async fn handle_did_open(&self, params: DidOpenTextDocumentParams) {
@@ -55,118 +56,16 @@ impl LoomServer {
         // Spawn each delegate init as an independent background task so fast delegates
         // (pyright ~200ms) don't wait for slow ones (Julia ~5s).
         for (lang, cmd, root_uri) in to_spawn {
-            let registry = self.registry.clone();
-            let client = self.client.clone();
-            let vdocs_map = self.virtual_documents.clone();
-            let diagnostics_store = self.diagnostics_store.clone();
-            let vdocs = vdocs.clone();
-
-            tokio::spawn(async move {
-                let cmd_str = cmd.join(" ");
-                let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        tracing::warn!("failed to spawn `{cmd_str}`: {e}");
-                        registry.lock().await.mark_failed(lang);
-                        return;
-                    }
-                };
-                if let Err(e) = delegate.initialize(root_uri).await {
-                    tracing::warn!("failed to initialize `{cmd_str}`: {e}");
-                    registry.lock().await.mark_failed(lang);
-                    return;
-                }
-
-                // Take notification rx before inserting into registry.
-                let rx = delegate.take_notification_rx();
-
-                // Insert into registry and send didOpen for matching vdocs.
-                {
-                    let mut reg = registry.lock().await;
-                    reg.insert_ready(lang.clone(), delegate);
-
-                    // Open virtual docs for this language on the new delegate.
-                    if let Some(handle) = reg.get_if_alive(&lang).await {
-                        for vdoc in &vdocs {
-                            if vdoc.language == lang
-                                && let Err(e) = handle
-                                    .lock()
-                                    .await
-                                    .open_document(vdoc.uri.clone(), &vdoc.language, &vdoc.content)
-                                    .await
-                            {
-                                tracing::warn!("failed to open virtual doc on delegate: {e}");
-                            }
-                        }
-                    }
-                }
-
-                // Spawn notification listener for diagnostics.
-                if let Some(mut rx) = rx {
-                    tokio::spawn(async move {
-                        while let Some(notif) = rx.recv().await {
-                            if notif.method != "textDocument/publishDiagnostics" {
-                                continue;
-                            }
-
-                            let params: tower_lsp::lsp_types::PublishDiagnosticsParams =
-                                match serde_json::from_value(notif.params) {
-                                    Ok(p) => p,
-                                    Err(e) => {
-                                        tracing::warn!("bad diagnostics params: {e}");
-                                        continue;
-                                    }
-                                };
-
-                            // Reverse-map: find which .qmd owns this virtual doc URI
-                            let found = vdocs_map.iter().find_map(|entry| {
-                                let host = entry.key().clone();
-                                entry
-                                    .value()
-                                    .iter()
-                                    .find(|vdoc| vdoc.uri == params.uri)
-                                    .map(|vdoc| (host, vdoc.clone()))
-                            });
-
-                            let (host_uri, vdoc) = match found {
-                                Some(pair) => pair,
-                                None => {
-                                    tracing::debug!("no host doc for {}", params.uri);
-                                    continue;
-                                }
-                            };
-
-                            // Filter out diagnostics on padding lines
-                            let filtered: Vec<tower_lsp::lsp_types::Diagnostic> = params
-                                .diagnostics
-                                .into_iter()
-                                .filter(|d| vdoc.is_live(d.range.start.line))
-                                .collect();
-
-                            tracing::info!(
-                                "publishDiagnostics: {} -> {} lang={} ({} filtered)",
-                                params.uri,
-                                host_uri,
-                                vdoc.language,
-                                filtered.len()
-                            );
-
-                            diagnostics_store
-                                .entry(host_uri.clone())
-                                .or_default()
-                                .insert(vdoc.language.clone(), filtered);
-
-                            let all: Vec<tower_lsp::lsp_types::Diagnostic> = diagnostics_store
-                                .get(&host_uri)
-                                .map(|entry| entry.values().flatten().cloned().collect())
-                                .unwrap_or_default();
-
-                            tracing::info!("publishing merged: {} ({} total)", host_uri, all.len());
-                            client.publish_diagnostics(host_uri, all, None).await;
-                        }
-                    });
-                }
-            });
+            spawn_delegate(
+                lang,
+                cmd,
+                root_uri,
+                vdocs.clone(),
+                self.registry.clone(),
+                self.client.clone(),
+                self.virtual_documents.clone(),
+                self.diagnostics_store.clone(),
+            );
         }
 
         // For languages that already have a running delegate, send didOpen immediately.

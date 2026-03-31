@@ -44,7 +44,7 @@ impl LoomServer {
             "forwarding completion to delegate: language={language} line={line} char={character}"
         );
 
-        // Never spawn delegates inside completion, did_open handles that.
+        // Never spawn delegates inside completion, did_open and did_change handle that.
         let sender: TransportSender = {
             let mut registry = self.registry.lock().await;
             match registry.get_if_alive(&language).await {
