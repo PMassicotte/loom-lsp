@@ -109,9 +109,10 @@ impl LoomServer {
                                         .collect();
 
                                     tracing::info!(
-                                        "publishDiagnostics: {} -> {} ({} items)",
+                                        "publishDiagnostics: {} -> {} lang={} ({} filtered)",
                                         params.uri,
                                         host_uri,
+                                        vdoc.language,
                                         filtered.len()
                                     );
 
@@ -128,8 +129,13 @@ impl LoomServer {
                                             })
                                             .unwrap_or_default();
 
+                                    tracing::info!(
+                                        "publishing merged: {} ({} total)",
+                                        host_uri,
+                                        all.len()
+                                    );
                                     client
-                                        .publish_diagnostics(host_uri, all, params.version)
+                                        .publish_diagnostics(host_uri, all, None)
                                         .await;
                                 }
                             });

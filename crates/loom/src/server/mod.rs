@@ -29,7 +29,7 @@ pub(crate) struct LoomServer {
     /// via direct await; slow LSPs (Julia) populate it via background tasks. Used as fallback
     /// when the direct request times out.
     pub(crate) completion_cache: Arc<DashMap<String, serde_json::Value>>,
-    pub(crate) diagnostics_store: DashMap<Url, HashMap<String, Vec<lsp_types::Diagnostic>>>,
+    pub(crate) diagnostics_store: Arc<DashMap<Url, HashMap<String, Vec<lsp_types::Diagnostic>>>>,
 }
 
 #[tower_lsp::async_trait]
