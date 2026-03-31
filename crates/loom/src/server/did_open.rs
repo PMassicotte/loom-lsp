@@ -38,7 +38,11 @@ impl LoomServer {
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
         self.chunks.insert(uri.clone(), parsed_chunks);
-        self.virtual_documents.insert(uri, vdocs.clone());
+        self.virtual_documents.insert(uri.clone(), vdocs.clone());
+        for vdoc in &vdocs {
+            self.reverse_vdoc_index
+                .insert(vdoc.uri.clone(), (uri.clone(), vdoc.clone()));
+        }
 
         // Collect which languages need a new delegate spawned.
         let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
@@ -63,7 +67,7 @@ impl LoomServer {
                 vdocs.clone(),
                 self.registry.clone(),
                 self.client.clone(),
-                self.virtual_documents.clone(),
+                self.reverse_vdoc_index.clone(),
                 self.diagnostics_store.clone(),
             );
         }

@@ -45,8 +45,19 @@ impl LoomServer {
 
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
+        // Remove stale reverse index entries before inserting new ones.
+        if let Some(old_vdocs) = self.virtual_documents.get(&uri) {
+            for old_vdoc in old_vdocs.iter() {
+                self.reverse_vdoc_index.remove(&old_vdoc.uri);
+            }
+        }
+
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri.clone(), vdocs.clone());
+        for vdoc in &vdocs {
+            self.reverse_vdoc_index
+                .insert(vdoc.uri.clone(), (uri.clone(), vdoc.clone()));
+        }
 
         // Spawn delegates for languages that are missing or dead.
         let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
@@ -69,7 +80,7 @@ impl LoomServer {
                 vdocs.clone(),
                 self.registry.clone(),
                 self.client.clone(),
-                self.virtual_documents.clone(),
+                self.reverse_vdoc_index.clone(),
                 self.diagnostics_store.clone(),
             );
         }

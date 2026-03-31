@@ -18,7 +18,7 @@ pub(crate) fn spawn_delegate(
     vdocs: Vec<VirtualDocument>,
     registry: Arc<Mutex<DelegateRegistry>>,
     client: tower_lsp::Client,
-    vdocs_map: DashMap<Url, Vec<VirtualDocument>>,
+    reverse_vdoc_index: Arc<DashMap<Url, (Url, VirtualDocument)>>,
     diagnostics_store: Arc<DashMap<Url, HashMap<String, Vec<lsp_types::Diagnostic>>>>,
 ) {
     tokio::spawn(async move {
@@ -78,23 +78,15 @@ pub(crate) fn spawn_delegate(
                             }
                         };
 
-                    // Reverse-map: find which .qmd owns this virtual doc URI
-                    let found = vdocs_map.iter().find_map(|entry| {
-                        let host = entry.key().clone();
-                        entry
-                            .value()
-                            .iter()
-                            .find(|vdoc| vdoc.uri == params.uri)
-                            .map(|vdoc| (host, vdoc.clone()))
-                    });
-
-                    let (host_uri, vdoc) = match found {
-                        Some(pair) => pair,
-                        None => {
-                            tracing::debug!("no host doc for {}", params.uri);
-                            continue;
-                        }
-                    };
+                    // O(1) reverse lookup: virtual_uri -> (host_uri, VirtualDocument)
+                    let (host_uri, vdoc) =
+                        match reverse_vdoc_index.get(&params.uri).map(|e| e.clone()) {
+                            Some(pair) => pair,
+                            None => {
+                                tracing::debug!("no host doc for {}", params.uri);
+                                continue;
+                            }
+                        };
 
                     // Filter out diagnostics on padding lines
                     let filtered: Vec<tower_lsp::lsp_types::Diagnostic> = params

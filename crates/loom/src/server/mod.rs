@@ -26,6 +26,8 @@ pub(crate) struct LoomServer {
     pub(crate) chunks: DashMap<Url, Vec<CodeChunk>>,
     pub(crate) virtual_documents: DashMap<Url, Vec<VirtualDocument>>,
     pub(crate) registry: Arc<Mutex<DelegateRegistry>>,
+    /// Reverse index: virtual_uri -> (host_uri, VirtualDocument) for O(1) diagnostics lookup.
+    pub(crate) reverse_vdoc_index: Arc<DashMap<Url, (Url, VirtualDocument)>>,
     /// Caches the most recent completion result per language. Fast LSPs (pyright) populate this
     /// via direct await; slow LSPs (Julia) populate it via background tasks. Used as fallback
     /// when the direct request times out.

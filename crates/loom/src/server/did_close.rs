@@ -15,6 +15,9 @@ impl LoomServer {
             .await;
 
         if let Some((_, vdocs)) = self.virtual_documents.remove(&uri) {
+            for vdoc in &vdocs {
+                self.reverse_vdoc_index.remove(&vdoc.uri);
+            }
             let mut handles = Vec::new();
             {
                 let mut registry = self.registry.lock().await;
