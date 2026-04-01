@@ -1,7 +1,9 @@
 mod completion;
+mod definition;
 mod did_change;
 mod did_close;
 mod did_open;
+mod hover;
 mod initialize;
 mod spawn_delegate;
 
@@ -13,8 +15,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    Url,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, Url,
 };
 use tower_lsp::{LanguageServer, lsp_types};
 
@@ -77,10 +79,10 @@ impl LanguageServer for LoomServer {
         self.handle_hover(params).await
     }
 
-    // async fn goto_definition(
-    //     &self,
-    //     params: GotoDefinitionParams,
-    // ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
-    //     self.handle_definition(params).await
-    // }
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        self.handle_definition(params).await
+    }
 }
