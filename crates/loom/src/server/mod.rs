@@ -3,6 +3,7 @@ mod definition;
 mod did_change;
 mod did_close;
 mod did_open;
+mod forward;
 mod hover;
 mod initialize;
 mod spawn_delegate;

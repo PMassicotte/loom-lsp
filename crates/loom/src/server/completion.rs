@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use loom_delegate::TransportSender;
-use loom_parse::language_at_position;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, Position, TextDocumentIdentifier,
     TextDocumentPositionParams,
@@ -20,41 +18,13 @@ impl LoomServer {
 
         tracing::info!("Completion request at {}:{}:{}", uri, line, character);
 
-        // Hold each DashMap ref only briefly — releasing the shard lock before any await prevents
-        // did_change's synchronous insert from blocking Tokio threads.
-        let language = {
-            let chunks = match self.chunks.get(uri) {
-                Some(c) => c,
-                None => return Ok(None),
-            };
-            match language_at_position(&chunks, line) {
-                Some(l) => l.to_string(),
-                None => return Ok(None),
-            }
-        };
-        let vdoc_uri = match self.virtual_documents.get(uri) {
-            Some(vdocs) => match vdocs.iter().find(|v| v.language == language) {
-                Some(vdoc) => vdoc.uri.clone(),
-                None => return Ok(None),
-            },
-            None => return Ok(None),
+        let Some((sender, vdoc_uri, language)) = self.resolve_delegate(uri, line).await else {
+            return Ok(None);
         };
 
         tracing::info!(
             "forwarding completion to delegate: language={language} line={line} char={character}"
         );
-
-        // Never spawn delegates inside completion, did_open and did_change handle that.
-        let sender: TransportSender = {
-            let mut registry = self.registry.lock().await;
-            match registry.get_if_alive(&language).await {
-                Some(handle) => handle.lock().await.sender(),
-                None => {
-                    tracing::info!("completion: delegate for {language} not ready yet");
-                    return Ok(None);
-                }
-            }
-        };
 
         let params_value = serde_json::to_value(CompletionParams {
             text_document_position: TextDocumentPositionParams {

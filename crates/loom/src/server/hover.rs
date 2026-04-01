@@ -1,4 +1,3 @@
-use loom_parse::language_at_position;
 use tower_lsp::lsp_types::{
     Hover, HoverParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,
 };
@@ -23,35 +22,8 @@ impl LoomServer {
             character
         );
 
-        let language = {
-            let chunks = match self.chunks.get(&uri) {
-                Some(c) => c,
-                None => return Ok(None),
-            };
-
-            match language_at_position(&chunks, line) {
-                Some(l) => l.to_string(),
-                None => return Ok(None),
-            }
-        };
-
-        let vdoc_uri = match self.virtual_documents.get(&uri) {
-            Some(vdocs) => match vdocs.iter().find(|v| v.language == language) {
-                Some(vdoc) => vdoc.uri.clone(),
-                None => return Ok(None),
-            },
-            None => return Ok(None),
-        };
-
-        let sender = {
-            let mut registry = self.registry.lock().await;
-            match registry.get_if_alive(&language).await {
-                Some(handle) => handle.lock().await.sender(),
-                None => {
-                    tracing::info!("hover: delegate for {language} not ready yet");
-                    return Ok(None);
-                }
-            }
+        let Some((sender, vdoc_uri, _)) = self.resolve_delegate(&uri, line).await else {
+            return Ok(None);
         };
 
         let params_value = serde_json::to_value(HoverParams {
