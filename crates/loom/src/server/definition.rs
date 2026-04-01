@@ -1,6 +1,6 @@
 use loom_parse::language_at_position;
 use tower_lsp::lsp_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, Location, Position, TextDocumentIdentifier,
+    GotoDefinitionParams, GotoDefinitionResponse, Position, TextDocumentIdentifier,
     TextDocumentPositionParams,
 };
 
@@ -66,11 +66,9 @@ impl LoomServer {
         })
         .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
-        let start = std::time::Instant::now();
         let response = sender
             .send_request("textDocument/definition", params_value)
             .await;
-        tracing::info!("definition: delegate responded in {:?}", start.elapsed());
 
         match response {
             Ok(raw) => {
