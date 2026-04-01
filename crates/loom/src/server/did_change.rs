@@ -1,3 +1,4 @@
+use crate::server::spawn_delegate::DelegateContext;
 use loom_parse::parse_qmd;
 use loom_vdoc::build_virtual_docs;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, Range};
@@ -78,10 +79,12 @@ impl LoomServer {
                 cmd,
                 root_uri,
                 vdocs.clone(),
-                self.registry.clone(),
-                self.client.clone(),
-                self.reverse_vdoc_index.clone(),
-                self.diagnostics_store.clone(),
+                DelegateContext {
+                    registry: self.registry.clone(),
+                    client: self.client.clone(),
+                    reverse_vdoc_index: self.reverse_vdoc_index.clone(),
+                    diagnostics_store: self.diagnostics_store.clone(),
+                },
             );
         }
 
