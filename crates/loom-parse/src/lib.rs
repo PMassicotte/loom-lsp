@@ -1,6 +1,15 @@
 // https://docs.rs/tree-sitter/latest/tree_sitter/#editing
 // Maybe good to check for faster parse on code change.
-use tree_sitter::Parser;
+use ropey::Rope;
+use tree_sitter::{InputEdit, Parser, Tree};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("Failed to load language: {0}")]
+    LanguageLoad(#[from] tree_sitter::LanguageError),
+    #[error("Failed to parse document")]
+    ParseFailed,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeChunk {
@@ -10,12 +19,121 @@ pub struct CodeChunk {
     pub end_line: u32,   // last line of the code (not the fence)
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ParseError {
-    #[error("Failed to load language: {0}")]
-    LanguageLoad(#[from] tree_sitter::LanguageError),
-    #[error("Failed to parse document")]
-    ParseFailed,
+pub struct DocumentParser {
+    parser: Parser,
+    tree: Option<Tree>,
+    rope: Rope,
+}
+
+impl DocumentParser {
+    pub fn new(source: &str) -> Result<(Self, Vec<CodeChunk>), ParseError> {
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_md::LANGUAGE.into())?;
+
+        let rope = Rope::from_str(source);
+        let source = ensure_trailing_newline(source);
+
+        let tree = parser
+            .parse(source.as_bytes(), None)
+            .ok_or(ParseError::ParseFailed)?;
+
+        let mut chunks = Vec::new();
+        collect_chunks(tree.root_node(), source.as_bytes(), &mut chunks);
+
+        Ok((
+            Self {
+                parser,
+                tree: Some(tree),
+                rope,
+            },
+            chunks,
+        ))
+    }
+
+    pub fn update(&mut self, new_source: &str) -> Result<Vec<CodeChunk>, ParseError> {
+        let new_rope = Rope::from_str(new_source);
+        let old_rope = &self.rope;
+
+        // Compute the edit range by diffing the old and new rope
+        let edit = compute_edit(old_rope, &new_rope);
+
+        // Tell TS about it
+        if let Some(ref mut tree) = self.tree {
+            tree.edit(&edit);
+        }
+
+        // Re-parse with the old tree for incremental speedup
+        let source = ensure_trailing_newline(new_source);
+        let new_tree = self
+            .parser
+            .parse(source.as_bytes(), self.tree.as_ref())
+            .ok_or(ParseError::ParseFailed)?;
+
+        let mut chunks = Vec::new();
+        collect_chunks(new_tree.root_node(), source.as_bytes(), &mut chunks);
+
+        self.tree = Some(new_tree);
+        self.rope = new_rope;
+
+        Ok(chunks)
+    }
+}
+
+fn compute_edit(old_rope: &Rope, new_rope: &Rope) -> InputEdit {
+    // Find first differing byte from the start
+    let old_bytes: Vec<u8> = old_rope.bytes().collect();
+    let new_bytes: Vec<u8> = new_rope.bytes().collect();
+
+    let start_byte = old_bytes
+        .iter()
+        .zip(new_bytes.iter())
+        .position(|(a, b)| a != b)
+        .unwrap_or(old_bytes.len().min(new_bytes.len()));
+
+    // Find first differing byte from the end
+    let common_suffix = old_bytes[start_byte..]
+        .iter()
+        .rev()
+        .zip(new_bytes[start_byte..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let old_end_byte = old_bytes.len() - common_suffix;
+    let new_end_byte = new_bytes.len() - common_suffix;
+
+    // Convert byte offsets to tree-sitter Points (row, column)
+    let start_point = byte_to_point(old_rope, start_byte);
+    let old_end_point = byte_to_point(old_rope, old_end_byte);
+    let new_end_point = byte_to_point(new_rope, new_end_byte);
+
+    InputEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte,
+        start_position: start_point,
+        old_end_position: old_end_point,
+        new_end_position: new_end_point,
+    }
+}
+
+fn byte_to_point(rope: &Rope, byte_offset: usize) -> tree_sitter::Point {
+    use ropey::LineType;
+    let byte_offset = byte_offset.min(rope.len());
+    let line = rope.byte_to_line_idx(byte_offset, LineType::LF_CR);
+    let line_start = rope.line_to_byte_idx(line, LineType::LF_CR);
+    let col = byte_offset - line_start;
+    tree_sitter::Point {
+        row: line,
+        column: col,
+    }
+}
+
+fn ensure_trailing_newline(source: &str) -> String {
+    if source.ends_with('\n') {
+        source.to_string()
+    } else {
+        format!("{source}\n")
+    }
 }
 
 fn collect_chunks(node: tree_sitter::Node, source: &[u8], chunks: &mut Vec<CodeChunk>) {
@@ -77,6 +195,8 @@ pub fn language_at_position(chunks: &[CodeChunk], line: u32) -> Option<&str> {
         .map(|c| c.language.as_str())
 }
 
+// TODO: Remove this function and change snapshots tests accordingly to use the new incremental TS
+// parser
 pub fn parse_qmd(source: &str) -> Result<Vec<CodeChunk>, ParseError> {
     let mut parser = Parser::new();
 
@@ -102,7 +222,10 @@ pub fn parse_qmd(source: &str) -> Result<Vec<CodeChunk>, ParseError> {
 }
 
 #[cfg(test)]
+
 mod test {
+    use super::DocumentParser;
+
     macro_rules! fixture {
         ($name:expr) => {
             include_str!(concat!(
@@ -160,5 +283,18 @@ mod test {
         // #| lines are kept in content for 1:1 buffer mapping
         // start_line/end_line refer to actual buffer positions (not fence lines)
         insta::assert_debug_snapshot!(chunks);
+    }
+
+    #[test]
+    fn test_incremental_parse() {
+        let source = "# Title\n\n```{python}\nx = 1\n```\n";
+        let (mut parser, chunks) = DocumentParser::new(source).unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].content, "x = 1");
+
+        let new_source = "# Title\n\n```{python}\nx = 2\n```\n";
+        let chunks = parser.update(new_source).unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].content, "x = 2");
     }
 }

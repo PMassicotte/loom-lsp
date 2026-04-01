@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ropey = "2.0.0-beta.1"
 thiserror = "2.0.18"
 tree-sitter = "0.26.7"
 tree-sitter-md = "0.5.3"
