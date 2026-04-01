@@ -72,4 +72,15 @@ impl LanguageServer for LoomServer {
             .log_message(MessageType::INFO, "Loom server initialized")
             .await;
     }
+
+    async fn hover(&self, params: HoverParams) -> tower_lsp::jsonrpc::Result<Option<Hover>> {
+        self.handle_hover(params).await
+    }
+
+    // async fn goto_definition(
+    //     &self,
+    //     params: GotoDefinitionParams,
+    // ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
+    //     self.handle_definition(params).await
+    // }
 }
