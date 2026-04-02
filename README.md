@@ -59,12 +59,12 @@ flowchart LR
 
 - [ ] Code actions
 - [x] Code completion
-- [ ] Diagnostics
+- [x] Diagnostics
 - [ ] Document symbols
 - [ ] Find references
 - [ ] Formatting
-- [ ] Go-to-definition
-- [ ] Hover information
+- [x] Go-to-definition
+- [x] Hover information
 - [ ] Rename symbol
 - [ ] Signature help
 - [x] Text synchronization
