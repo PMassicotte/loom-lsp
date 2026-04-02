@@ -9,7 +9,7 @@ mod initialize;
 mod spawn_delegate;
 
 use dashmap::DashMap;
-use loom_parse::CodeChunk;
+use loom_parse::{CodeChunk, DocumentParser};
 use loom_vdoc::VirtualDocument;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +36,7 @@ pub(crate) struct LoomServer {
     /// when the direct request times out.
     pub(crate) completion_cache: Arc<DashMap<String, serde_json::Value>>,
     pub(crate) diagnostics_store: Arc<DashMap<Url, HashMap<String, Vec<lsp_types::Diagnostic>>>>,
+    pub(crate) parsers: DashMap<Url, Mutex<DocumentParser>>,
 }
 
 #[tower_lsp::async_trait]

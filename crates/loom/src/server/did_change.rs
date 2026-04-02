@@ -1,6 +1,7 @@
 use crate::server::spawn_delegate::DelegateContext;
-use loom_parse::parse_qmd;
+use loom_parse::DocumentParser;
 use loom_vdoc::build_virtual_docs;
+use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, Range};
 
 use super::LoomServer;
@@ -13,24 +14,51 @@ impl LoomServer {
 
         tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
 
-        let parsed_chunks = match parse_qmd(&text) {
-            Ok(chunks) => chunks,
-            Err(e) => {
-                tracing::error!("failed to parse {}: {e}", uri);
-                self.client
-                    .publish_diagnostics(
-                        uri.clone(),
-                        vec![Diagnostic {
-                            range: Range::default(),
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            source: Some("loom".into()),
-                            message: format!("Loom failed to parse document: {e}"),
-                            ..Default::default()
-                        }],
-                        None,
-                    )
-                    .await;
-                return;
+        let parsed_chunks = if let Some(entry) = self.parsers.get(&uri) {
+            match entry.value().lock().await.update(&text) {
+                Ok(chunks) => chunks,
+                Err(e) => {
+                    tracing::error!("incremental parse failed for {}: {e}", uri);
+                    self.client
+                        .publish_diagnostics(
+                            uri.clone(),
+                            vec![Diagnostic {
+                                range: Range::default(),
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                source: Some("loom".into()),
+                                message: format!("Loom failed to parse document: {e}"),
+                                ..Default::default()
+                            }],
+                            None,
+                        )
+                        .await;
+                    return;
+                }
+            }
+        } else {
+            // No parser yet (e.g. change arrived before open); create one.
+            match DocumentParser::new(&text) {
+                Ok((parser, chunks)) => {
+                    self.parsers.insert(uri.clone(), Mutex::new(parser));
+                    chunks
+                }
+                Err(e) => {
+                    tracing::error!("failed to parse {}: {e}", uri);
+                    self.client
+                        .publish_diagnostics(
+                            uri.clone(),
+                            vec![Diagnostic {
+                                range: Range::default(),
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                source: Some("loom".into()),
+                                message: format!("Loom failed to parse document: {e}"),
+                                ..Default::default()
+                            }],
+                            None,
+                        )
+                        .await;
+                    return;
+                }
             }
         };
         let mut vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);

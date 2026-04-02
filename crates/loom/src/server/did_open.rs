@@ -1,5 +1,6 @@
-use loom_parse::parse_qmd;
+use loom_parse::DocumentParser;
 use loom_vdoc::build_virtual_docs;
+use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, Range};
 
 use crate::server::spawn_delegate::DelegateContext;
@@ -14,8 +15,8 @@ impl LoomServer {
 
         tracing::info!("Document opened: {} ({} bytes)", uri, text.len());
 
-        let parsed_chunks = match parse_qmd(&text) {
-            Ok(chunks) => chunks,
+        let (doc_parser, parsed_chunks) = match DocumentParser::new(&text) {
+            Ok((parser, chunks)) => (parser, chunks),
             Err(e) => {
                 tracing::error!("failed to parse {}: {e}", uri);
                 self.client
@@ -36,6 +37,7 @@ impl LoomServer {
                 return;
             }
         };
+        self.parsers.insert(uri.clone(), Mutex::new(doc_parser));
         let vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 

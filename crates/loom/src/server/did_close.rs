@@ -9,6 +9,7 @@ impl LoomServer {
         tracing::info!("Document closed: {}", uri);
 
         self.chunks.remove(&uri);
+        self.parsers.remove(&uri);
         self.diagnostics_store.remove(&uri);
         self.client
             .publish_diagnostics(uri.clone(), vec![], None)

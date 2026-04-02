@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reverse_vdoc_index: Arc::new(DashMap::new()),
         completion_cache: Arc::new(DashMap::new()),
         diagnostics_store: Arc::new(DashMap::new()),
+        parsers: DashMap::new(),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

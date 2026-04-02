@@ -25,6 +25,14 @@ pub struct DocumentParser {
     rope: Rope,
 }
 
+impl std::fmt::Debug for DocumentParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DocumentParser")
+            .field("has_tree", &self.tree.is_some())
+            .finish()
+    }
+}
+
 impl DocumentParser {
     pub fn new(source: &str) -> Result<(Self, Vec<CodeChunk>), ParseError> {
         let mut parser = Parser::new();
@@ -195,34 +203,7 @@ pub fn language_at_position(chunks: &[CodeChunk], line: u32) -> Option<&str> {
         .map(|c| c.language.as_str())
 }
 
-// TODO: Remove this function and change snapshots tests accordingly to use the new incremental TS
-// parser
-pub fn parse_qmd(source: &str) -> Result<Vec<CodeChunk>, ParseError> {
-    let mut parser = Parser::new();
-
-    parser.set_language(&tree_sitter_md::LANGUAGE.into())?;
-
-    // tree-sitter-md requires a trailing newline to correctly close fenced code
-    // blocks at end of file; normalise here so callers don't have to.
-    let owned;
-    let source = if source.ends_with('\n') {
-        source
-    } else {
-        owned = format!("{source}\n");
-        &owned
-    };
-
-    let tree = parser.parse(source, None).ok_or(ParseError::ParseFailed)?;
-    let root_node = tree.root_node();
-
-    let mut chunks = Vec::new();
-    collect_chunks(root_node, source.as_bytes(), &mut chunks);
-
-    Ok(chunks)
-}
-
 #[cfg(test)]
-
 mod test {
     use super::DocumentParser;
 
@@ -265,21 +246,23 @@ mod test {
     fn test_parse_qmd() {
         let source = fixture!("mixed_languages.qmd");
 
-        let chunks = super::parse_qmd(source).unwrap();
+        let chunks = DocumentParser::new(source).unwrap().1;
+
         insta::assert_debug_snapshot!(chunks);
     }
 
     #[test]
     fn test_plain_fence_skipped() {
         let source = fixture!("plain_fence.qmd");
-        let chunks = super::parse_qmd(source).unwrap();
+
+        let chunks = DocumentParser::new(source).unwrap().1;
         assert!(chunks.is_empty());
     }
 
     #[test]
     fn test_integration_realistic_qmd() {
         let source = fixture!("python_r.qmd");
-        let chunks = super::parse_qmd(source).unwrap();
+        let chunks = DocumentParser::new(source).unwrap().1;
         // #| lines are kept in content for 1:1 buffer mapping
         // start_line/end_line refer to actual buffer positions (not fence lines)
         insta::assert_debug_snapshot!(chunks);
