@@ -5,6 +5,9 @@
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-experimental-red.svg)]()
 
+> [!WARNING]
+> This project is in early development and is not yet ready for production use. Expect breaking changes and incomplete features.
+
 Write [Quarto](https://quarto.org/) documents and get IDE support for different languages in your notebook at the same time.
 
 ## The problem
