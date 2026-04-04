@@ -54,8 +54,21 @@ impl DelegateRegistry {
 
     /// Increments the failure count for a language. After 3 failures, the language is
     /// considered permanently failed and no more spawn attempts will be made.
-    pub fn mark_failed(&mut self, language: String) {
-        *self.failed.entry(language).or_insert(0) += 1;
+    /// Increments the failure count. Returns `true` if the language just became permanently failed.
+    pub fn mark_failed(&mut self, language: String) -> bool {
+        let count = self.failed.entry(language.clone()).or_insert(0);
+
+        *count += 1;
+
+        if *count >= 3 {
+            tracing::error!(
+                "{language} LSP failed {count} times and will not be retried; check your config"
+            );
+
+            return true;
+        }
+
+        false
     }
 
     /// Returns the existing delegate handle if present, without spawning. Returns None if not

@@ -27,17 +27,37 @@ pub(crate) fn spawn_delegate(
 ) {
     tokio::spawn(async move {
         let cmd_str = cmd.join(" ");
+
         let mut delegate = match loom_delegate::DelegateServer::spawn(&cmd) {
             Ok(d) => d,
             Err(e) => {
                 tracing::warn!("failed to spawn `{cmd_str}`: {e}");
-                ctx.registry.lock().await.mark_failed(lang);
+
+                if ctx.registry.lock().await.mark_failed(lang.clone()) {
+                    ctx.client.show_message(
+                        lsp_types::MessageType::ERROR,
+                        format!("{lang} LSP failed 3 times and will not be retried; check your config"),
+                    ).await;
+                }
+
                 return;
             }
         };
+
         if let Err(e) = delegate.initialize(root_uri).await {
             tracing::warn!("failed to initialize `{cmd_str}`: {e}");
-            ctx.registry.lock().await.mark_failed(lang);
+
+            if ctx.registry.lock().await.mark_failed(lang.clone()) {
+                ctx.client
+                    .show_message(
+                        lsp_types::MessageType::ERROR,
+                        format!(
+                            "{lang} LSP failed 3 times and will not be retried; check your config"
+                        ),
+                    )
+                    .await;
+            }
+
             return;
         }
 
