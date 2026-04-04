@@ -6,6 +6,7 @@ mod did_open;
 mod forward;
 mod hover;
 mod initialize;
+mod rename;
 mod spawn_delegate;
 
 use dashmap::DashMap;
@@ -17,7 +18,7 @@ use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, Url,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, RenameParams, Url,
 };
 use tower_lsp::{LanguageServer, lsp_types};
 
@@ -86,5 +87,12 @@ impl LanguageServer for LoomServer {
         params: GotoDefinitionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
         self.handle_definition(params).await
+    }
+
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<tower_lsp::lsp_types::WorkspaceEdit>> {
+        self.handle_rename(params).await
     }
 }
