@@ -49,7 +49,12 @@ impl LoomServer {
                     .get("result")
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
-                Ok(serde_json::from_value::<Option<R>>(result).unwrap_or(None))
+                Ok(
+                    serde_json::from_value::<Option<R>>(result).unwrap_or_else(|e| {
+                        tracing::warn!("{method} response from delegate has unexpected shape: {e}");
+                        None
+                    }),
+                )
             }
             Err(e) => {
                 tracing::error!("{method} request failed: {e}");
