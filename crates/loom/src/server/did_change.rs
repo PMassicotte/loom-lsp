@@ -4,7 +4,7 @@ use crate::server::spawn_delegate::DelegateContext;
 use loom_parse::{CodeChunk, DocumentParser};
 use loom_vdoc::build_virtual_docs;
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, Range};
+use tower_lsp::lsp_types::DidChangeTextDocumentParams;
 
 use super::LoomServer;
 use super::spawn_delegate::spawn_delegate;
@@ -30,19 +30,7 @@ impl LoomServer {
                 Ok(chunks) => chunks,
                 Err(e) => {
                     tracing::error!("incremental parse failed for {}: {e}", uri);
-                    self.client
-                        .publish_diagnostics(
-                            uri.clone(),
-                            vec![Diagnostic {
-                                range: Range::default(),
-                                severity: Some(DiagnosticSeverity::WARNING),
-                                source: Some("loom".into()),
-                                message: format!("Loom failed to parse document: {e}"),
-                                ..Default::default()
-                            }],
-                            None,
-                        )
-                        .await;
+                    self.publish_parse_error(uri.clone(), format!("Loom failed to parse document: {e}")).await;
                     return;
                 }
             }
@@ -55,19 +43,7 @@ impl LoomServer {
                 }
                 Err(e) => {
                     tracing::error!("failed to parse {}: {e}", uri);
-                    self.client
-                        .publish_diagnostics(
-                            uri.clone(),
-                            vec![Diagnostic {
-                                range: Range::default(),
-                                severity: Some(DiagnosticSeverity::WARNING),
-                                source: Some("loom".into()),
-                                message: format!("Loom failed to parse document: {e}"),
-                                ..Default::default()
-                            }],
-                            None,
-                        )
-                        .await;
+                    self.publish_parse_error(uri.clone(), format!("Loom failed to parse document: {e}")).await;
                     return;
                 }
             }

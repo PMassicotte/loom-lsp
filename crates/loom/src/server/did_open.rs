@@ -1,7 +1,7 @@
 use loom_parse::DocumentParser;
 use loom_vdoc::build_virtual_docs;
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, Range};
+use tower_lsp::lsp_types::DidOpenTextDocumentParams;
 
 use crate::server::spawn_delegate::DelegateContext;
 
@@ -19,19 +19,11 @@ impl LoomServer {
             Ok((parser, chunks)) => (parser, chunks),
             Err(e) => {
                 tracing::error!("failed to parse {}: {e}", uri);
-                self.client
-                    .publish_diagnostics(
-                        uri.clone(),
-                        vec![Diagnostic {
-                            range: Range::default(),
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            source: Some("loom".into()),
-                            message: format!("Loom failed to parse document: {e}"),
-                            ..Default::default()
-                        }],
-                        None,
-                    )
-                    .await;
+                self.publish_parse_error(
+                    uri.clone(),
+                    format!("Loom failed to parse document: {e}"),
+                )
+                .await;
                 self.chunks.insert(uri.clone(), Vec::new());
                 self.virtual_documents.insert(uri, Vec::new());
                 return;

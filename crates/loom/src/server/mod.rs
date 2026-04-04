@@ -26,6 +26,7 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
     InitializedParams, MessageType, RenameParams, SignatureHelp, SignatureHelpParams, Url,
 };
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use tower_lsp::{LanguageServer, lsp_types};
 
 use crate::registry::DelegateRegistry;
@@ -125,5 +126,23 @@ impl LanguageServer for LoomServer {
         params: SignatureHelpParams,
     ) -> tower_lsp::jsonrpc::Result<Option<SignatureHelp>> {
         self.handle_signature_help(params).await
+    }
+}
+
+impl LoomServer {
+    pub(crate) async fn publish_parse_error(&self, uri: Url, msg: String) {
+        self.client
+            .publish_diagnostics(
+                uri,
+                vec![Diagnostic {
+                    range: Range::default(),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("loom".into()),
+                    message: msg,
+                    ..Default::default()
+                }],
+                None,
+            )
+            .await;
     }
 }
