@@ -13,9 +13,15 @@ impl LoomServer {
         let uri = params.text_document.uri.clone();
         let line = params.range.start.line;
 
-        let Some((sender, vdoc_uri, _)) = self.resolve_delegate(&uri, line).await else {
+        let Some((sender, vdoc_uri, language)) = self.resolve_delegate(&uri, line).await else {
             return Ok(None);
         };
+
+        // WARNING: LanguageServer.jl has a bug where its codeAction handler returns an invalid
+        // type, causing the JSONRPC layer to throw and crash the entire server process.
+        if language == "julia" {
+            return Ok(None);
+        }
 
         let response: Option<CodeActionResponse> = self
             .send_to_delegate(
