@@ -12,7 +12,13 @@ use super::spawn_delegate::spawn_delegate;
 impl LoomServer {
     pub(crate) async fn handle_did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        let text = params.content_changes[0].text.clone();
+
+        let Some(change) = params.content_changes.into_iter().next() else {
+            tracing::warn!("did_change for {} had empty contentChanges; ignoring", uri);
+            return;
+        };
+
+        let text = change.text;
 
         tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
 
