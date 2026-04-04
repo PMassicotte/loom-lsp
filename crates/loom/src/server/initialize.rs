@@ -1,3 +1,4 @@
+use crate::server::lsp_types::CodeActionProviderCapability;
 use tower_lsp::lsp_types::{
     CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
     SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
@@ -21,14 +22,25 @@ impl LoomServer {
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(
+                            SaveOptions {
+                                include_text: Some(false),
+                            }
+                            .into(),
+                        ),
+                        ..Default::default()
+                    },
                 )),
                 completion_provider: Some(CompletionOptions::default()),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
         })

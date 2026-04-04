@@ -60,7 +60,7 @@ flowchart LR
 
 ## Supported LSP features
 
-- [ ] Code actions
+- [x] Code actions
 - [x] Code completion
 - [x] Diagnostics
 - [ ] Document symbols

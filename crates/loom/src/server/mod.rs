@@ -1,3 +1,4 @@
+mod code_action;
 mod completion;
 mod definition;
 mod did_change;
@@ -109,5 +110,12 @@ impl LanguageServer for LoomServer {
         params: tower_lsp::lsp_types::DocumentRangeFormattingParams,
     ) -> tower_lsp::jsonrpc::Result<Option<Vec<lsp_types::TextEdit>>> {
         self.handle_range_formatting(params).await
+    }
+
+    async fn code_action(
+        &self,
+        params: tower_lsp::lsp_types::CodeActionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<tower_lsp::lsp_types::CodeActionOrCommand>>> {
+        self.handle_code_action(params).await
     }
 }
