@@ -55,7 +55,23 @@ impl DelegateServer {
         let params = lsp_types::InitializeParams {
             process_id: None,
             root_uri,
-            capabilities: lsp_types::ClientCapabilities::default(),
+            capabilities: lsp_types::ClientCapabilities {
+                text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                    code_action: Some(lsp_types::CodeActionClientCapabilities {
+                        // Advertise literal CodeAction support so servers that check this
+                        // (e.g. LanguageServer.jl) return CodeAction objects instead of
+                        // falling back to a Command-only path that may be broken.
+                        code_action_literal_support: Some(lsp_types::CodeActionLiteralSupport {
+                            code_action_kind: lsp_types::CodeActionKindLiteralSupport {
+                                value_set: vec![],
+                            },
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
             ..Default::default()
         };
 
