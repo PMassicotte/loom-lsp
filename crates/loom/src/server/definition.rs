@@ -26,42 +26,27 @@ impl LoomServer {
             return Ok(None);
         };
 
-        let params_value = serde_json::to_value(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: vdoc_uri.clone(),
+        let resp: Option<GotoDefinitionResponse> = self
+            .send_to_delegate(
+                "textDocument/definition",
+                sender,
+                GotoDefinitionParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier {
+                            uri: vdoc_uri.clone(),
+                        },
+                        position: Position { line, character },
+                    },
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
                 },
-                position: Position { line, character },
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+            )
+            .await?;
 
-        let response = sender
-            .send_request("textDocument/definition", params_value)
-            .await;
-
-        match response {
-            Ok(raw) => {
-                let result = raw
-                    .get("result")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                let resp: Option<GotoDefinitionResponse> =
-                    serde_json::from_value(result).unwrap_or(None);
-                Ok(resp.map(|r| rewrite_uris(r, &vdoc_uri, &uri)))
-            }
-            Err(e) => {
-                tracing::error!("definition request failed: {e}");
-                Ok(None)
-            }
-        }
+        Ok(resp.map(|r| rewrite_uris(r, &vdoc_uri, &uri)))
     }
 }
 
-/// Rewrite virtual doc URIs back to the host URI so the editor jumps
-/// to the .qmd file instead of the non-existent virtual doc on disk.
 fn rewrite_uris(
     resp: GotoDefinitionResponse,
     vdoc_uri: &tower_lsp::lsp_types::Url,

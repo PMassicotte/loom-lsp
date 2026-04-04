@@ -27,52 +27,32 @@ impl LoomServer {
             return Ok(None);
         };
 
-        let params_value = serde_json::to_value(RenameParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: vdoc_uri.clone(),
+        let edit: Option<WorkspaceEdit> = self
+            .send_to_delegate(
+                "textDocument/rename",
+                sender,
+                RenameParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier {
+                            uri: vdoc_uri.clone(),
+                        },
+                        position: Position { line, character },
+                    },
+                    new_name: params.new_name,
+                    work_done_progress_params: Default::default(),
                 },
-                position: Position { line, character },
-            },
-            new_name: params.new_name,
-            work_done_progress_params: Default::default(),
-        })
-        .map_err(|e| {
-            tracing::error!("Failed to serialize rename params: {e}");
-            tower_lsp::jsonrpc::Error::invalid_params(e.to_string())
-        })?;
+            )
+            .await?;
 
-        let response = sender
-            .send_request("textDocument/rename", params_value)
-            .await;
-
-        match response {
-            Ok(raw) => {
-                let result = raw
-                    .get("result")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-
-                let edit = serde_json::from_value::<Option<WorkspaceEdit>>(result).unwrap_or(None);
-
-                Ok(edit.map(|e| rewrite_workspace_edit(e, &vdoc_uri, &uri)))
-            }
-            Err(e) => {
-                tracing::error!("Failed to get rename response: {e}");
-                Ok(None)
-            }
-        }
+        Ok(edit.map(|e| rewrite_workspace_edit(e, &vdoc_uri, &uri)))
     }
 }
 
-/// Rewrites a `WorkspaceEdit` from a delegate to replace any references to the virtual document
-/// URI with the host document URI. This is necessary because the delegate operates on the virtual document, but the edits need to be applied to the host document.
 fn rewrite_workspace_edit(
     mut edit: WorkspaceEdit,
     vdoc_uri: &Url,
     host_uri: &Url,
 ) -> WorkspaceEdit {
-    // First case: `changes` field, which is a simple map of URI to edits.
     if let Some(changes) = edit.changes.take() {
         edit.changes = Some(
             changes
@@ -88,8 +68,6 @@ fn rewrite_workspace_edit(
                 .collect::<HashMap<_, _>>(),
         );
     }
-
-    // Second case: `document_changes` field, which can contain either edits or operations.
     if let Some(doc_changes) = edit.document_changes.take() {
         edit.document_changes = Some(match doc_changes {
             DocumentChanges::Edits(mut edits) => {

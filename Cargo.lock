@@ -649,6 +649,7 @@ dependencies = [
  "loom-delegate",
  "loom-parse",
  "loom-vdoc",
+ "serde",
  "serde_json",
  "tokio",
  "tower-lsp",
