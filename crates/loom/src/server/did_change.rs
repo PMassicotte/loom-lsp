@@ -72,6 +72,7 @@ impl LoomServer {
                 }
             }
         };
+
         let mut vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
 
         let changed_languages: HashSet<String> = {
@@ -105,7 +106,7 @@ impl LoomServer {
             }
         }
 
-        tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
+        tracing::debug!("built {} virtual docs for {}", vdocs.len(), uri);
 
         // Remove stale reverse index entries before inserting new ones.
         if let Some(old_vdocs) = self.virtual_documents.get(&uri) {
@@ -155,23 +156,29 @@ impl LoomServer {
             let mut registry = self.registry.lock().await;
             for vdoc in &vdocs {
                 if !changed_languages.contains(&vdoc.language) {
-                    tracing::info!("skipping delegate {} (unchanged)", vdoc.language);
+                    tracing::debug!("skipping delegate {} (unchanged)", vdoc.language);
                     continue;
                 }
                 if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
-                    handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()));
+                    handles.push((
+                        handle,
+                        vdoc.language.clone(),
+                        vdoc.uri.clone(),
+                        vdoc.version,
+                        vdoc.content.clone(),
+                    ));
                 }
             }
         }
 
-        for (handle, vdoc_uri, version, content) in handles {
+        for (handle, lang, vdoc_uri, version, content) in handles {
             if let Err(e) = handle
                 .lock()
                 .await
-                .update_document(vdoc_uri, version, &content)
+                .update_document(vdoc_uri.clone(), version, &content)
                 .await
             {
-                tracing::warn!("failed to update virtual doc on delegate: {e}");
+                tracing::warn!("failed to update {} delegate for {}: {e}", lang, vdoc_uri);
             }
         }
     }

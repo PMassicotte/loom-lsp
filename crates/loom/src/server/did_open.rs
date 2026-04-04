@@ -13,7 +13,7 @@ impl LoomServer {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
 
-        tracing::info!("Document opened: {} ({} bytes)", uri, text.len());
+        tracing::debug!("Document opened: {} ({} bytes)", uri, text.len());
 
         let (doc_parser, parsed_chunks) = match DocumentParser::new(&text) {
             Ok((parser, chunks)) => (parser, chunks),
@@ -37,12 +37,16 @@ impl LoomServer {
                 return;
             }
         };
+
         self.parsers.insert(uri.clone(), Mutex::new(doc_parser));
+
         let vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
-        tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
+
+        tracing::debug!("built {} virtual docs for {}", vdocs.len(), uri);
 
         self.chunks.insert(uri.clone(), parsed_chunks);
         self.virtual_documents.insert(uri.clone(), vdocs.clone());
+
         for vdoc in &vdocs {
             self.reverse_vdoc_index
                 .insert(vdoc.uri.clone(), (uri.clone(), vdoc.clone()));
@@ -96,14 +100,15 @@ impl LoomServer {
                 }
             }
         }
+
         for (handle, vdoc_uri, language, content) in handles {
             if let Err(e) = handle
                 .lock()
                 .await
-                .open_document(vdoc_uri, &language, &content)
+                .open_document(vdoc_uri.clone(), &language, &content)
                 .await
             {
-                tracing::warn!("failed to open virtual doc on delegate: {e}");
+                tracing::warn!("failed to open {} delegate for {}: {e}", language, vdoc_uri);
             }
         }
     }
