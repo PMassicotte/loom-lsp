@@ -87,7 +87,7 @@ pub(crate) fn spawn_delegate(
                         match ctx.reverse_vdoc_index.get(&params.uri).map(|e| e.clone()) {
                             Some(pair) => pair,
                             None => {
-                                tracing::debug!("no host doc for {}", params.uri);
+                                tracing::info!("no host doc for {} (stale vdoc?)", params.uri);
                                 continue;
                             }
                         };
@@ -100,7 +100,7 @@ pub(crate) fn spawn_delegate(
                         .collect();
 
                     tracing::info!(
-                        "publishDiagnostics: {} -> {} lang={} ({} filtered)",
+                        "publishDiagnostics: {} -> {} lang={} ({} diagnostics)",
                         params.uri,
                         host_uri,
                         vdoc.language,
@@ -118,7 +118,6 @@ pub(crate) fn spawn_delegate(
                         .map(|entry| entry.values().flatten().cloned().collect())
                         .unwrap_or_default();
 
-                    tracing::info!("publishing merged: {} ({} total)", host_uri, all.len());
                     ctx.client.publish_diagnostics(host_uri, all, None).await;
                 }
             });
