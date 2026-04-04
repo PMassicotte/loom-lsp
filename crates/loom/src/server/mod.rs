@@ -3,6 +3,7 @@ mod definition;
 mod did_change;
 mod did_close;
 mod did_open;
+mod did_save;
 mod forward;
 mod hover;
 mod initialize;
@@ -19,8 +20,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, RenameParams, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, RenameParams, Url,
 };
 use tower_lsp::{LanguageServer, lsp_types};
 
@@ -65,6 +67,10 @@ impl LanguageServer for LoomServer {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         self.handle_did_change(params).await
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.handle_did_save(params).await
     }
 
     async fn completion(

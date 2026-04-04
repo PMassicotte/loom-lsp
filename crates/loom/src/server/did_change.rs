@@ -68,14 +68,6 @@ impl LoomServer {
         };
         let mut vdocs = build_virtual_docs(&parsed_chunks, text.split('\n').count() as u32, &uri);
 
-        // Increment version for each virtual doc from the previous state.
-        if let Some(old_vdocs) = self.virtual_documents.get(&uri) {
-            for vdoc in &mut vdocs {
-                if let Some(old) = old_vdocs.iter().find(|v| v.language == vdoc.language) {
-                    vdoc.version = old.version + 1;
-                }
-            }
-        }
         let changed_languages: HashSet<String> = {
             let mut changed = HashSet::new();
             for vdoc in &vdocs {
@@ -93,6 +85,19 @@ impl LoomServer {
             }
             changed
         };
+
+        // Increment version only for languages that actually changed.
+        if let Some(old_vdocs) = self.virtual_documents.get(&uri) {
+            for vdoc in &mut vdocs {
+                if let Some(old) = old_vdocs.iter().find(|v| v.language == vdoc.language) {
+                    if changed_languages.contains(&vdoc.language) {
+                        vdoc.version = old.version + 1;
+                    } else {
+                        vdoc.version = old.version;
+                    }
+                }
+            }
+        }
 
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
