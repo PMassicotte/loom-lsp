@@ -68,6 +68,7 @@ flowchart LR
 - [ ] Formatting
 - [x] Go-to-definition
 - [x] Hover information
+- [x] Range formatting
 - [x] Rename symbol
 - [ ] Signature help
 - [x] Text synchronization

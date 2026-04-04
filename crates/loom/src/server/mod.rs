@@ -6,6 +6,7 @@ mod did_open;
 mod forward;
 mod hover;
 mod initialize;
+mod range_formatting;
 mod rename;
 mod spawn_delegate;
 
@@ -94,5 +95,12 @@ impl LanguageServer for LoomServer {
         params: RenameParams,
     ) -> tower_lsp::jsonrpc::Result<Option<tower_lsp::lsp_types::WorkspaceEdit>> {
         self.handle_rename(params).await
+    }
+
+    async fn range_formatting(
+        &self,
+        params: tower_lsp::lsp_types::DocumentRangeFormattingParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<lsp_types::TextEdit>>> {
+        self.handle_range_formatting(params).await
     }
 }
