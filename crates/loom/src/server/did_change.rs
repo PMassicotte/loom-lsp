@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use crate::server::spawn_delegate::DelegateContext;
-use loom_parse::DocumentParser;
+use loom_parse::{CodeChunk, DocumentParser};
 use loom_vdoc::build_virtual_docs;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, Range};
@@ -13,6 +15,9 @@ impl LoomServer {
         let text = params.content_changes[0].text.clone();
 
         tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
+
+        let old_chunks: Vec<CodeChunk> =
+            self.chunks.get(&uri).map(|c| c.clone()).unwrap_or_default();
 
         let parsed_chunks = if let Some(entry) = self.parsers.get(&uri) {
             match entry.value().lock().await.update(&text) {
@@ -71,6 +76,23 @@ impl LoomServer {
                 }
             }
         }
+        let changed_languages: HashSet<String> = {
+            let mut changed = HashSet::new();
+            for vdoc in &vdocs {
+                let old_content: Vec<&CodeChunk> = old_chunks
+                    .iter()
+                    .filter(|c| c.language == vdoc.language)
+                    .collect();
+                let new_content: Vec<&CodeChunk> = parsed_chunks
+                    .iter()
+                    .filter(|c| c.language == vdoc.language)
+                    .collect();
+                if old_content != new_content {
+                    changed.insert(vdoc.language.clone());
+                }
+            }
+            changed
+        };
 
         tracing::info!("built {} virtual docs for {}", vdocs.len(), uri);
 
@@ -121,11 +143,16 @@ impl LoomServer {
         {
             let mut registry = self.registry.lock().await;
             for vdoc in &vdocs {
+                if !changed_languages.contains(&vdoc.language) {
+                    tracing::info!("skipping delegate {} (unchanged)", vdoc.language);
+                    continue;
+                }
                 if let Some(handle) = registry.get_if_alive(&vdoc.language).await {
                     handles.push((handle, vdoc.uri.clone(), vdoc.version, vdoc.content.clone()));
                 }
             }
         }
+
         for (handle, vdoc_uri, version, content) in handles {
             if let Err(e) = handle
                 .lock()
