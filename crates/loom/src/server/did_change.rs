@@ -30,7 +30,11 @@ impl LoomServer {
                 Ok(chunks) => chunks,
                 Err(e) => {
                     tracing::error!("incremental parse failed for {}: {e}", uri);
-                    self.publish_parse_error(uri.clone(), format!("Loom failed to parse document: {e}")).await;
+                    self.publish_parse_error(
+                        uri.clone(),
+                        format!("Loom failed to parse document: {e}"),
+                    )
+                    .await;
                     return;
                 }
             }
@@ -43,7 +47,11 @@ impl LoomServer {
                 }
                 Err(e) => {
                     tracing::error!("failed to parse {}: {e}", uri);
-                    self.publish_parse_error(uri.clone(), format!("Loom failed to parse document: {e}")).await;
+                    self.publish_parse_error(
+                        uri.clone(),
+                        format!("Loom failed to parse document: {e}"),
+                    )
+                    .await;
                     return;
                 }
             }
