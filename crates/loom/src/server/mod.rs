@@ -10,6 +10,7 @@ mod hover;
 mod initialize;
 mod range_formatting;
 mod rename;
+mod signature_help;
 mod spawn_delegate;
 mod workspace_edit;
 
@@ -23,7 +24,7 @@ use tower_lsp::lsp_types::{
     CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, RenameParams, Url,
+    InitializedParams, MessageType, RenameParams, SignatureHelp, SignatureHelpParams, Url,
 };
 use tower_lsp::{LanguageServer, lsp_types};
 
@@ -117,5 +118,12 @@ impl LanguageServer for LoomServer {
         params: tower_lsp::lsp_types::CodeActionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<Vec<tower_lsp::lsp_types::CodeActionOrCommand>>> {
         self.handle_code_action(params).await
+    }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<SignatureHelp>> {
+        self.handle_signature_help(params).await
     }
 }

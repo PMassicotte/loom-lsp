@@ -1,8 +1,8 @@
 use crate::server::lsp_types::CodeActionProviderCapability;
 use tower_lsp::lsp_types::{
     CompletionOptions, HoverProviderCapability, InitializeParams, InitializeResult, OneOf,
-    SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions,
+    SaveOptions, ServerCapabilities, ServerInfo, SignatureHelpOptions, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions,
 };
 
 use super::LoomServer;
@@ -41,6 +41,10 @@ impl LoomServer {
                 rename_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    ..Default::default()
+                }),
                 ..ServerCapabilities::default()
             },
         })

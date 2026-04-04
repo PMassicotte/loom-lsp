@@ -70,7 +70,7 @@ flowchart LR
 - [x] Hover information
 - [x] Range formatting
 - [x] Rename symbol
-- [ ] Signature help
+- [x] Signature help
 - [x] Text synchronization
 - [ ] Workspace symbols
 
