@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use tower_lsp::lsp_types::{
-    DocumentChangeOperation, DocumentChanges, Position, RenameParams, TextDocumentIdentifier,
-    TextDocumentPositionParams, Url, WorkspaceEdit,
+    Position, RenameParams, TextDocumentIdentifier, TextDocumentPositionParams, WorkspaceEdit,
 };
 
 use super::LoomServer;
+use super::workspace_edit::rewrite_workspace_edit;
 
 impl LoomServer {
     pub(crate) async fn handle_rename(
@@ -46,49 +45,4 @@ impl LoomServer {
 
         Ok(edit.map(|e| rewrite_workspace_edit(e, &vdoc_uri, &uri)))
     }
-}
-
-fn rewrite_workspace_edit(
-    mut edit: WorkspaceEdit,
-    vdoc_uri: &Url,
-    host_uri: &Url,
-) -> WorkspaceEdit {
-    if let Some(changes) = edit.changes.take() {
-        edit.changes = Some(
-            changes
-                .into_iter()
-                .map(|(uri, edits)| {
-                    let uri = if uri == *vdoc_uri {
-                        host_uri.clone()
-                    } else {
-                        uri
-                    };
-                    (uri, edits)
-                })
-                .collect::<HashMap<_, _>>(),
-        );
-    }
-    if let Some(doc_changes) = edit.document_changes.take() {
-        edit.document_changes = Some(match doc_changes {
-            DocumentChanges::Edits(mut edits) => {
-                for e in &mut edits {
-                    if e.text_document.uri == *vdoc_uri {
-                        e.text_document.uri = host_uri.clone();
-                    }
-                }
-                DocumentChanges::Edits(edits)
-            }
-            DocumentChanges::Operations(mut ops) => {
-                for op in &mut ops {
-                    if let DocumentChangeOperation::Edit(text_edit) = op
-                        && text_edit.text_document.uri == *vdoc_uri
-                    {
-                        text_edit.text_document.uri = host_uri.clone();
-                    }
-                }
-                DocumentChanges::Operations(ops)
-            }
-        });
-    }
-    edit
 }
