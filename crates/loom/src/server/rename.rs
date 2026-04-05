@@ -15,7 +15,7 @@ impl LoomServer {
             position: Position { line, character },
         } = params.text_document_position;
 
-        tracing::info!(
+        tracing::debug!(
             "Rename request received for {} at line {}, character {}",
             uri,
             line,

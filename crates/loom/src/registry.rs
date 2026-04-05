@@ -47,7 +47,7 @@ impl DelegateRegistry {
 
     /// Inserts an already-initialized delegate. Call this after initializing outside the lock.
     pub fn insert_ready(&mut self, language: String, delegate: DelegateServer) {
-        tracing::info!("delegate ready for {language}");
+        tracing::debug!("delegate ready for {language}");
         self.delegates
             .insert(language, Arc::new(Mutex::new(delegate)));
     }

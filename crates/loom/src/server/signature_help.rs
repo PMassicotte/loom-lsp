@@ -15,7 +15,7 @@ impl LoomServer {
             position: Position { line, character },
         } = params.text_document_position_params;
 
-        tracing::info!(
+        tracing::debug!(
             "Signature help request received for {} at line {}, character {}",
             uri,
             line,
@@ -23,7 +23,7 @@ impl LoomServer {
         );
 
         let Some((sender, vdoc_uri, _)) = self.resolve_delegate(&uri, line).await else {
-            tracing::info!("signature_help: no delegate for {} at line {}", uri, line);
+            tracing::debug!("signature_help: no delegate for {} at line {}", uri, line);
             return Ok(None);
         };
 

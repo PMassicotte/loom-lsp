@@ -6,7 +6,7 @@ impl LoomServer {
     pub(crate) async fn handle_did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
 
-        tracing::info!("Document closed: {}", uri);
+        tracing::debug!("Document closed: {}", uri);
 
         self.chunks.remove(&uri);
         self.parsers.remove(&uri);

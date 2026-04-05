@@ -15,7 +15,7 @@ impl LoomServer {
             position: Position { line, character },
         } = params.text_document_position_params;
 
-        tracing::info!(
+        tracing::debug!(
             "Definition request received for {} at line {}, character {}",
             uri,
             line,

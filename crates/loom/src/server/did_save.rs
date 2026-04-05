@@ -7,7 +7,7 @@ impl LoomServer {
     pub(crate) async fn handle_did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
 
-        tracing::info!("Document saved: {}", uri);
+        tracing::debug!("Document saved: {}", uri);
 
         let Some(vdocs) = self.virtual_documents.get(&uri).map(|v| v.clone()) else {
             return;
@@ -58,7 +58,7 @@ impl LoomServer {
             if let Err(e) = sender.send_message(open).await {
                 tracing::warn!("failed to send didOpen to {language} delegate: {e}");
             } else {
-                tracing::info!("refreshed {language} delegate on save");
+                tracing::debug!("refreshed {language} delegate on save");
             }
         }
     }

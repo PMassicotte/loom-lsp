@@ -20,7 +20,7 @@ impl LoomServer {
 
         let text = change.text;
 
-        tracing::info!("Document changed: {} ({} bytes)", uri, text.len());
+        tracing::debug!("Document changed: {} ({} bytes)", uri, text.len());
 
         let old_chunks: Vec<CodeChunk> =
             self.chunks.get(&uri).map(|c| c.clone()).unwrap_or_default();

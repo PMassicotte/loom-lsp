@@ -107,7 +107,7 @@ pub(crate) fn spawn_delegate(
                         match ctx.reverse_vdoc_index.get(&params.uri).map(|e| e.clone()) {
                             Some(pair) => pair,
                             None => {
-                                tracing::info!("no host doc for {} (stale vdoc?)", params.uri);
+                                tracing::debug!("no host doc for {} (stale vdoc?)", params.uri);
                                 continue;
                             }
                         };
@@ -119,7 +119,7 @@ pub(crate) fn spawn_delegate(
                         .filter(|d| vdoc.is_live(d.range.start.line))
                         .collect();
 
-                    tracing::info!(
+                    tracing::debug!(
                         "publishDiagnostics: {} -> {} lang={} ({} diagnostics)",
                         params.uri,
                         host_uri,

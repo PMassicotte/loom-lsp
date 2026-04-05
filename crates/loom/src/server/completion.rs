@@ -16,13 +16,13 @@ impl LoomServer {
         let line = params.text_document_position.position.line;
         let character = params.text_document_position.position.character;
 
-        tracing::info!("Completion request at {}:{}:{}", uri, line, character);
+        tracing::debug!("Completion request at {}:{}:{}", uri, line, character);
 
         let Some((sender, vdoc_uri, language)) = self.resolve_delegate(uri, line).await else {
             return Ok(None);
         };
 
-        tracing::info!(
+        tracing::debug!(
             "forwarding completion to delegate: language={language} line={line} char={character}"
         );
 

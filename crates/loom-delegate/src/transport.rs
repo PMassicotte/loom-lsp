@@ -169,7 +169,7 @@ async fn reader_loop(
         } else if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
             // Case 3: Notification (method, no id), e.g. textDocument/publishDiagnostics.
             let params = msg.get("params").cloned().unwrap_or(Value::Null);
-            tracing::info!("notification: {}", method);
+            tracing::debug!("notification: {}", method);
             let _ = notification_tx.send(Notification {
                 method: method.to_string(),
                 params,
