@@ -94,7 +94,6 @@ log_level = "info"
 [languages.python]
 server_command = ["pyright-langserver", "--stdio"]
 root_markers = ["pyproject.toml", "setup.py"]
-settings = { python = { analysis = { typeCheckingMode = "basic" } } }
 
 [languages.r]
 server_command = ["R", "--slave", "-e", "languageserver::run()"]

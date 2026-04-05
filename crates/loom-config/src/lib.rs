@@ -19,6 +19,7 @@ pub struct ServerConfig {
 pub struct LanguageConfig {
     pub server_command: Vec<String>,
     pub root_markers: Option<Vec<String>>,
+    // TODO: pass as `initializationOptions` in the LSP `initialize` request
     pub settings: Option<toml::Value>,
 }
 
