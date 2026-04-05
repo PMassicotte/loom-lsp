@@ -37,18 +37,22 @@ impl LoomServer {
         })
         .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
-        // Always send the request in a background task so it survives neovim's
-        // $/cancelRequest, which cancels the tower-lsp handler future. The background
-        // task updates the cache when the LSP responds, regardless of what happens here.
+        // Always send the request in a background task so it survives $/cancelRequest, which
+        // cancels the tower-lsp handler future. The background task updates the cache when the
+        // LSP responds, regardless of what happens here.
         let (fresh_tx, fresh_rx) = tokio::sync::oneshot::channel();
+
         let cache = Arc::clone(&self.completion_cache);
+
         let lang = language.clone();
+
         tokio::spawn(async move {
             if let Ok(raw) = sender
                 .send_request("textDocument/completion", params_value)
                 .await
             {
                 let result = raw["result"].clone();
+
                 if !result.is_null() {
                     cache.insert(lang, result.clone());
                     let _ = fresh_tx.send(result);
@@ -56,25 +60,23 @@ impl LoomServer {
             }
         });
 
-        // Wait briefly for the background task's result. Fast LSPs (pyright ~50ms) respond
-        // in time and we return fresh completions. Slow LSPs (Julia ~2s) time out and we
-        // fall back to the stale cache, which the background task will eventually update.
-        if let Ok(Ok(result)) =
-            tokio::time::timeout(std::time::Duration::from_millis(200), fresh_rx).await
-        {
-            tracing::info!("completion: fresh result for {language}");
-            return Ok(serde_json::from_value(result).ok().flatten());
-        }
-
-        // Stale cache fallback. Strip textEdit since cursor positions may be stale.
+        // Stale-while-revalidate: if we have a cached result return it immediately and
+        // let the background task warm the cache for the next request. This avoids any
+        // arbitrary timeout and works equally well for fast and slow LSPs.
         if let Some(cached) = self.completion_cache.get(&language) {
             let mut value = cached.clone();
             strip_text_edits(&mut value);
-            tracing::info!("completion: stale cache for {language}");
+            tracing::debug!("completion: stale cache for {language}");
             return Ok(serde_json::from_value(value).ok().flatten());
         }
 
-        tracing::info!("completion: no result for {language}");
+        // No cache yet (first request for this language), wait for the fresh result.
+        if let Ok(result) = fresh_rx.await {
+            tracing::debug!("completion: fresh result for {language}");
+            return Ok(serde_json::from_value(result).ok().flatten());
+        }
+
+        tracing::debug!("completion: no result for {language}");
         Ok(None)
     }
 }
