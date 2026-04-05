@@ -19,7 +19,6 @@ pub struct ServerConfig {
 pub struct LanguageConfig {
     pub server_command: Vec<String>,
     pub root_markers: Option<Vec<String>>,
-    pub preamble: Option<String>,
     pub settings: Option<toml::Value>,
 }
 
@@ -178,7 +177,6 @@ server_command = ["pylsp"]
         let config = LanguageConfig {
             server_command: vec!["dummy".to_string()],
             root_markers: Some(vec![".git".to_string(), "pyproject.toml".to_string()]),
-            preamble: None,
             settings: None,
         };
 
@@ -196,7 +194,6 @@ server_command = ["pylsp"]
         let config = LanguageConfig {
             server_command: vec!["dummy".to_string()],
             root_markers: Some(vec![".git".to_string(), "pyproject.toml".to_string()]),
-            preamble: None,
             settings: None,
         };
 
