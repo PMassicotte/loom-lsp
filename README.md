@@ -12,7 +12,7 @@ Write [Quarto](https://quarto.org/) documents and get IDE support for different 
 
 ## The problem
 
-Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...) all in one document. The issue is that the editor only understands one language at a time, in the case of a Quarto document, it usually defaults to markdown. This means no autocomplete, no diagnostics, no hover documentation, and no go-to-definition for your Python or R code.
+Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...) all in one document. The issue is that the editor only understands one language at a time, in the case of a Quarto document, it usually defaults to markdown. This means no autocomplete, no diagnostics, no hover documentation, and no go-to-definition for your preferred language.
 
 ## What loom-lsp does
 
@@ -24,7 +24,7 @@ loom-lsp doesn't replace your favorite language LSP, it connects them within a s
 
 ### Editors support
 
-loom-lsp is designed to work with any editor that supports the Language Server Protocol (LSP). As the project evolves, it will be tested with popular editors such as Neovim, VS Code, Zed and more.
+loom-lsp should work with any LSP-compatible editor. It is currently developed and tested with Neovim, but VS Code, Zed, and others are planned. If you would like to help test it with your editor, please reach out!
 
 ## Architecture
 
