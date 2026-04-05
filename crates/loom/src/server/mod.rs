@@ -85,7 +85,7 @@ impl LanguageServer for LoomServer {
 
     async fn initialized(&self, _params: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "Loom server initialized")
+            .log_message(MessageType::INFO, "loom-lsp server initialized")
             .await;
     }
 
@@ -137,7 +137,7 @@ impl LoomServer {
                 vec![Diagnostic {
                     range: Range::default(),
                     severity: Some(DiagnosticSeverity::WARNING),
-                    source: Some("loom".into()),
+                    source: Some("loom-lsp".into()),
                     message: msg,
                     ..Default::default()
                 }],

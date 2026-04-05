@@ -1,6 +1,6 @@
-# Loom
+# loom-lsp
 
-[![Build](https://github.com/PMassicotte/loom/actions/workflows/rust.yml/badge.svg)](https://github.com/PMassicotte/loom/actions/workflows/rust.yml)
+[![Build](https://github.com/PMassicotte/loom-lsp/actions/workflows/rust.yml/badge.svg)](https://github.com/PMassicotte/loom-lsp/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-experimental-red.svg)]()
@@ -14,17 +14,17 @@ Write [Quarto](https://quarto.org/) documents and get IDE support for different 
 
 Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...) all in one document. The issue is that the editor only understands one language at a time, in the case of a Quarto document, it usually defaults to markdown. This means no autocomplete, no diagnostics, no hover documentation, and no go-to-definition for your Python or R code.
 
-## What loom does
+## What loom-lsp does
 
-Loom is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to the right LSP server. For example, Python chunks to pyright or pylsp, R chunks to the R language server, markdown to marksman. Your editor talks to one server, loom handles the rest.
+loom-lsp is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to the right LSP server. For example, Python chunks to pyright or pylsp, R chunks to the R language server, markdown to marksman. Your editor talks to one server, loom-lsp handles the rest.
 
 ## Works with your existing tools
 
-Loom doesn't replace your favorite language LSP, it connects them within a single document. If you've already configured your Python or R environment, loom picks it up automatically. No new tooling to learn, no duplicate configuration.
+loom-lsp doesn't replace your favorite language LSP, it connects them within a single document. If you've already configured your Python or R environment, loom-lsp picks it up automatically. No new tooling to learn, no duplicate configuration.
 
 ### Editors support
 
-Loom is designed to work with any editor that supports the Language Server Protocol (LSP). As the project evolves, it will be tested with popular editors such as Neovim, VS Code, Zed and more.
+loom-lsp is designed to work with any editor that supports the Language Server Protocol (LSP). As the project evolves, it will be tested with popular editors such as Neovim, VS Code, Zed and more.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ Loom is designed to work with any editor that supports the Language Server Proto
 flowchart LR
     Editor["Your Editor\n(Neovim, VS Code, …)"]
 
-    subgraph loom
+    subgraph loom-lsp
         LS["Language Server\n(LSP endpoint)"]
         Parser["Quarto Parser\n(chunk boundaries)"]
         VDocs["Virtual Documents\n(per-language, line-padded)"]
@@ -74,12 +74,12 @@ flowchart LR
 - [x] Text synchronization
 - [ ] Workspace symbols
 
-## Loom configuration
+## loom-lsp configuration
 
-Loom looks for configuration files in the following order, with later entries taking precedence:
+loom-lsp looks for configuration files in the following order, with later entries taking precedence:
 
-1. `~/.config/loom/loom.toml` for global settings and language configurations
-2. `.loom.toml` in the current project directory which will override global settings for that project.
+1. `~/.config/loom-lsp/loom-lsp.toml` for global settings and language configurations
+2. `.loom-lsp.toml` in the current project directory which will override global settings for that project.
 
 For each language, you can specify the command to start the LSP server, the root markers to identify the project root, and any additional settings needed for that language. Here's an example configuration:
 

@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         load_config()?
     };
 
-    let log_file = std::fs::File::create(std::env::temp_dir().join("loom.log"))?;
+    let log_file = std::fs::File::create(std::env::temp_dir().join("loom-lsp.log"))?;
 
     let level = config
         .server
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or("info");
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(format!("loom={level},loom_delegate={level}"))
+        tracing_subscriber::EnvFilter::new(format!("loom_lsp={level},loom_delegate={level}"))
     });
 
     tracing_subscriber::fmt()
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(filter)
         .init();
 
-    tracing::info!("Starting loom language server");
+    tracing::info!("Starting loom-lsp language server");
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

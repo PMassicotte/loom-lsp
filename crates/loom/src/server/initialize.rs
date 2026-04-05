@@ -18,7 +18,7 @@ impl LoomServer {
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
-                name: "loom".to_string(),
+                name: "loom-lsp".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
