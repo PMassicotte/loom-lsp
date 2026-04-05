@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 ropey = "2.0.0-beta.1"
-thiserror = "2.0.18"
-tree-sitter = "0.26.7"
+thiserror.workspace = true
+tree-sitter = "0.26.8"
 tree-sitter-md = "0.5.3"
 
 [dev-dependencies]
-insta = "1"
+insta.workspace = true
