@@ -28,6 +28,8 @@ loom-lsp is designed to work with any editor that supports the Language Server P
 
 ## Architecture
 
+When your editor sends a request (completion, hover, diagnostics, etc.), loom-lsp parses the `.qmd` file into per-language virtual documents, line-padded so that line numbers stay in sync with the original file. Each language gets its own delegate process running the real language server, spawned lazily on first use. loom-lsp forwards the request to the right delegate, rewrites any URIs in the response back to the host document, and returns the result to the editor. The editor never knows there are multiple language servers involved.
+
 ```mermaid
 flowchart LR
     Editor["Your Editor\n(Neovim, VS Code, …)"]
@@ -39,13 +41,14 @@ flowchart LR
         Registry["Delegate Registry"]
 
         subgraph Delegates
-            DS1["DelegateServer\n(Python)"]
-            DS2["DelegateServer\n(R)"]
+            DS1["DelegateServer\n(lang A)"]
+            DS2["DelegateServer\n(lang B)"]
+            DSN["DelegateServer\n(…)"]
         end
     end
 
-    Pyright["pyright-langserver"]
-    RLS["r-languageserver"]
+    LSA["language-server-A\n(e.g. pyright)"]
+    LSB["language-server-B\n(e.g. r-languageserver)"]
 
     Editor -- "LSP (stdio)" --> LS
     LS --> Parser
@@ -54,8 +57,9 @@ flowchart LR
     LS --> Registry
     Registry --> DS1
     Registry --> DS2
-    DS1 -- "LSP (stdio)" --> Pyright
-    DS2 -- "LSP (stdio)" --> RLS
+    Registry --> DSN
+    DS1 -- "LSP (stdio)" --> LSA
+    DS2 -- "LSP (stdio)" --> LSB
 ```
 
 ## Supported LSP features
