@@ -30,8 +30,8 @@ cargo install --git https://github.com/pmassicotte/loom-lsp --branch main loom-l
 
 loom-lsp looks for configuration files in the following order, with later entries taking precedence:
 
-1. `~/.config/loom-lsp/loom-lsp.toml` is the global settings and language configurations
-2. `.loom-lsp.toml` in the current project directory and overrides global settings for that project
+1. `~/.config/loom-lsp/loom.toml` is the global settings and language configurations
+2. `.loom.toml` in the current project directory and overrides global settings for that project
 
 ### Server options
 

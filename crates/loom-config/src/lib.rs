@@ -65,10 +65,10 @@ pub fn load_config() -> Result<Config, ConfigError> {
     let mut config_paths = Vec::new();
 
     if let Some(config_dir) = dirs::config_dir() {
-        config_paths.push(config_dir.join("loom-lsp").join("loom-lsp.toml"));
+        config_paths.push(config_dir.join("loom").join("loom.toml"));
     }
 
-    config_paths.push(std::env::current_dir()?.join(".loom-lsp.toml"));
+    config_paths.push(std::env::current_dir()?.join(".loom.toml"));
 
     // Load and merge configs from all found paths, with later paths taking precedence.
     let mut result = Config::default();
