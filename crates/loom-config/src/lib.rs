@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Config {
     pub server: Option<ServerConfig>,
+    #[serde(default)]
     pub languages: HashMap<String, LanguageConfig>,
 }
 
