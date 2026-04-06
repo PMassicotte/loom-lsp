@@ -67,6 +67,10 @@ server_command = [
 
 [languages.ts]
 server_command = ["typescript-language-server", "--stdio"]
+
+# This lsp will be used for yaml code chunks but also for Quarto frontmatter
+[languages.yaml]
+server_command = ["yaml-language-server", "--stdio"]
 ```
 
 `server_command` is required. `root_markers` is optional. When provided, loom-lsp uses these files to locate the project root for that language.
