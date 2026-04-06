@@ -44,6 +44,8 @@ impl LoomServer {
                 .insert(vdoc.uri.clone(), (uri.clone(), vdoc.clone()));
         }
 
+        let qmd_path = uri.to_file_path().unwrap_or_default();
+
         // Collect which languages need a new delegate spawned.
         let to_spawn: Vec<(String, Vec<String>, Option<tower_lsp::lsp_types::Url>)> = {
             let registry = self.registry.lock().await;
@@ -51,7 +53,7 @@ impl LoomServer {
                 .iter()
                 .filter_map(|vdoc| {
                     registry
-                        .spawn_params(&vdoc.language)
+                        .spawn_params(&vdoc.language, &qmd_path)
                         .map(|(cmd, root_uri)| (vdoc.language.clone(), cmd, root_uri))
                 })
                 .collect()

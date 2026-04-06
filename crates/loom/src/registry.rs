@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use loom_config::LanguageConfig;
@@ -36,13 +37,23 @@ impl DelegateRegistry {
     /// Returns `Some((command, root_uri))` if `language` needs to be spawned (not yet running and
     /// not failed), or `None` if it already has a delegate or is in the failed set. Used by
     /// callers that want to initialize delegates outside the registry lock.
-    pub fn spawn_params(&self, language: &str) -> Option<(Vec<String>, Option<Url>)> {
+    pub fn spawn_params(
+        &self,
+        language: &str,
+        qmd_path: &Path,
+    ) -> Option<(Vec<String>, Option<Url>)> {
         if self.is_failed(language) || self.delegates.contains_key(language) {
             return None;
         }
-        self.configs
-            .get(language)
-            .map(|cfg| (cfg.server_command.clone(), self.root_uri.clone()))
+
+        self.configs.get(language).map(|cfg| {
+            let root = cfg
+                .find_root(qmd_path)
+                .and_then(|p| Url::from_file_path(p).ok())
+                .or_else(|| self.root_uri.clone());
+
+            (cfg.server_command.clone(), root)
+        })
     }
 
     /// Inserts an already-initialized delegate. Call this after initializing outside the lock.
