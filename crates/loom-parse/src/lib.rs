@@ -145,6 +145,34 @@ fn ensure_trailing_newline(source: &str) -> String {
 }
 
 fn collect_chunks(node: tree_sitter::Node, source: &[u8], chunks: &mut Vec<CodeChunk>) {
+    if node.kind() == "minus_metadata" {
+        let raw = node.utf8_text(source).unwrap_or("");
+        let lines: Vec<&str> = raw.lines().collect();
+
+        // Remove the opening and closing '---' lines
+        let content_lines = match lines.as_slice() {
+            [_open, rest @ .., _close] => rest,
+            _ => return,
+        };
+
+        if content_lines.is_empty() {
+            return;
+        }
+
+        let content = content_lines.join("\n");
+        let start_line = node.start_position().row as u32 + 1;
+        let end_line = start_line + content_lines.len() as u32 - 1;
+
+        chunks.push(CodeChunk {
+            language: "yaml".to_string(),
+            content,
+            start_line,
+            end_line,
+        });
+
+        return;
+    }
+
     if node.kind() == "fenced_code_block" {
         let mut language = None;
         let mut content_node = None;

@@ -4,6 +4,12 @@ expression: chunks
 ---
 [
     CodeChunk {
+        language: "yaml",
+        content: "title: \"Test\"",
+        start_line: 1,
+        end_line: 1,
+    },
+    CodeChunk {
         language: "python",
         content: "#| label: setup\nimport pandas as pd\ndf = pd.read_csv(\"data.csv\")",
         start_line: 7,

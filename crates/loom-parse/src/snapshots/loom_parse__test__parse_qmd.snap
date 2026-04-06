@@ -4,6 +4,12 @@ expression: chunks
 ---
 [
     CodeChunk {
+        language: "yaml",
+        content: "title: \"Mixed Languages\"",
+        start_line: 1,
+        end_line: 1,
+    },
+    CodeChunk {
         language: "python",
         content: "#| label: py-setup\nimport matplotlib.pyplot as plt\nx = range(1, 11)",
         start_line: 7,
