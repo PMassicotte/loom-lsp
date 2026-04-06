@@ -16,15 +16,76 @@ Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...)
 
 ## What loom-lsp does
 
-loom-lsp is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to the right LSP server. For example, Python chunks to pyright or pylsp, R chunks to the R language server, markdown to marksman. Your editor talks to one server, loom-lsp handles the rest.
+loom-lsp is a language server that sits between your editor and your existing language tools. It understands the structure of a Quarto document and routes each part to your preferred LSP server. For example, Python chunks to pyright or pylsp, R chunks to the R language server, typescript to typescript-language-server. Your editor talks to one server, loom-lsp handles the rest.
 
-## Works with your existing tools
+## Installation
 
-loom-lsp doesn't replace your favorite language LSP, it connects them within a single document. If you've already configured your Python or R environment, loom-lsp picks it up automatically. No new tooling to learn, no duplicate configuration.
+loom-lsp is not yet published to crates.io, but you can install it directly from GitHub using Cargo. You will need the [Rust toolchain](https://rustup.rs/) installed.
 
-### Editors support
+```bash
+cargo install --git https://github.com/pmassicotte/loom-lsp --branch main loom-lsp
+```
 
-loom-lsp should work with any LSP-compatible editor. It is currently developed and tested with Neovim, but VS Code, Zed, and others are planned. If you would like to help test it with your editor, please reach out!
+## Configuration
+
+loom-lsp looks for configuration files in the following order, with later entries taking precedence:
+
+1. `~/.config/loom-lsp/loom-lsp.toml` is the global settings and language configurations
+2. `.loom-lsp.toml` in the current project directory and overrides global settings for that project
+
+### Server options
+
+```toml
+[server]
+log_level = "info"  # or one of: trace | debug | info | warn | error
+```
+
+### Language configuration
+
+For each language, specify the command to start the LSP server and, optionally, root markers to identify the project root. Here is an example configuration:
+
+```toml
+[languages.python]
+server_command = ["pyright-langserver", "--stdio"]
+root_markers = ["pyproject.toml", "setup.py"]
+
+[languages.r]
+server_command = ["R", "--slave", "-e", "languageserver::run()"]
+root_markers = [".Rproj", "DESCRIPTION"]
+
+[languages.lua]
+server_command = ["lua-language-server"]
+
+[languages.julia]
+server_command = [
+  "julia",
+  "--startup-file=no",
+  "--history-file=no",
+  "-e",
+  "using LanguageServer; runserver()"
+]
+
+[languages.ts]
+server_command = ["typescript-language-server", "--stdio"]
+```
+
+`server_command` is required. `root_markers` is optional. When provided, loom-lsp uses these files to locate the project root for that language.
+
+## Editor Support
+
+loom-lsp works with any LSP-compatible editor. It is currently developed and tested with Neovim. If you would like to help test it with your editor, please [open an issue](https://github.com/PMassicotte/loom-lsp/issues).
+
+### Neovim
+
+```lua
+vim.lsp.config("loom-lsp", {
+    cmd = { "loom-lsp", "--stdio" },
+    filetypes = { "quarto" },
+    root_dir = vim.fs.root(0, { ".git", "_quarto.yml" }),
+})
+
+vim.lsp.enable("loom-lsp")
+```
 
 ## Architecture
 
@@ -64,47 +125,25 @@ flowchart LR
 
 ## Supported LSP features
 
-- [x] Code actions
-- [x] Code completion
-- [x] Diagnostics
-- [ ] Document symbols
-- [ ] Find references
-- [ ] Formatting
-- [x] Go-to-definition
-- [x] Hover information
-- [x] Range formatting
-- [x] Rename symbol
-- [x] Signature help
-- [x] Text synchronization
-- [ ] Workspace symbols
+This is the current status of LSP features in loom-lsp. All core features are supported, but some are still a work in progress.
 
-## loom-lsp configuration
+| Feature              | Status |
+| -------------------- | ------ |
+| Code actions         | ✅     |
+| Code completion      | ✅     |
+| Diagnostics          | ✅     |
+| Go-to-definition     | ✅     |
+| Hover information    | ✅     |
+| Range formatting     | ✅     |
+| Rename symbol        | ✅     |
+| Signature help       | ✅     |
+| Text synchronization | ✅     |
+| Document symbols     | 🚧     |
+| Find references      | 🚧     |
+| Highlighting         | 🚧     |
+| Formatting           | 🚧     |
+| Workspace symbols    | 🚧     |
 
-loom-lsp looks for configuration files in the following order, with later entries taking precedence:
+## Contributing
 
-1. `~/.config/loom-lsp/loom-lsp.toml` for global settings and language configurations
-2. `.loom-lsp.toml` in the current project directory which will override global settings for that project.
-
-For each language, you can specify the command to start the LSP server, the root markers to identify the project root, and any additional settings needed for that language. Here's an example configuration:
-
-```toml
-[server]
-log_level = "info"
-
-[languages.python]
-server_command = ["pyright-langserver", "--stdio"]
-root_markers = ["pyproject.toml", "setup.py"]
-
-[languages.r]
-server_command = ["R", "--slave", "-e", "languageserver::run()"]
-root_markers = [".Rproj", "DESCRIPTION"]
-
-[languages.markdown]
-server_command = ["marksman", "server"]
-
-[languages.yaml]
-server_command = ["yaml-language-server", "--stdio"]
-
-[languages.lua]
-server_command = ["lua-language-server"]
-```
+Bug reports and feedback are welcome. Please [open an issue](https://github.com/PMassicotte/loom-lsp/issues).
