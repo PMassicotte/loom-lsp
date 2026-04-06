@@ -42,4 +42,23 @@ expression: vdoc
             fragment: None,
         },
     },
+    VirtualDocument {
+        language: "yaml",
+        content: "\ntitle: \"Mixed Languages\"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        version: 0,
+        live_ranges: [
+            1..2,
+        ],
+        uri: Url {
+            scheme: "file",
+            cannot_be_a_base: false,
+            username: "",
+            password: None,
+            host: None,
+            port: None,
+            path: "/test/mixed_languages.loom-vdoc.yaml",
+            query: None,
+            fragment: None,
+        },
+    },
 ]
