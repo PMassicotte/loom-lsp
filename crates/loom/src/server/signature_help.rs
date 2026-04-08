@@ -1,7 +1,4 @@
-use tower_lsp::lsp_types::{
-    Position, SignatureHelp, SignatureHelpParams, TextDocumentIdentifier,
-    TextDocumentPositionParams,
-};
+use tower_lsp::lsp_types::{SignatureHelp, SignatureHelpParams};
 
 use super::LoomServer;
 
@@ -10,35 +7,15 @@ impl LoomServer {
         &self,
         params: SignatureHelpParams,
     ) -> tower_lsp::jsonrpc::Result<Option<SignatureHelp>> {
-        let TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position { line, character },
-        } = params.text_document_position_params;
-
-        tracing::debug!(
-            "Signature help request received for {} at line {}, character {}",
-            uri,
-            line,
-            character
-        );
-
-        let Some((sender, vdoc_uri, _)) = self.resolve_delegate(&uri, line).await else {
-            tracing::debug!("signature_help: no delegate for {} at line {}", uri, line);
-            return Ok(None);
-        };
-
-        self.send_to_delegate(
-            "textDocument/signatureHelp",
-            sender,
-            SignatureHelpParams {
-                context: None,
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: vdoc_uri },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: Default::default(),
-            },
-        )
-        .await
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .clone();
+        let line = params.text_document_position_params.position.line;
+        let result = self
+            .forward_request("textDocument/signatureHelp", params, &uri, line)
+            .await?;
+        Ok(serde_json::from_value(result).unwrap_or(None))
     }
 }

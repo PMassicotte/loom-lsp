@@ -12,7 +12,6 @@ mod range_formatting;
 mod rename;
 mod signature_help;
 mod spawn_delegate;
-mod workspace_edit;
 
 use dashmap::DashMap;
 use loom_parse::{CodeChunk, DocumentParser};
