@@ -60,23 +60,29 @@ impl LoomServer {
             }
         });
 
-        // Stale-while-revalidate: if we have a cached result return it immediately and
-        // let the background task warm the cache for the next request. This avoids any
-        // arbitrary timeout and works equally well for fast and slow LSPs.
-        if let Some(cached) = self.completion_cache.get(&language) {
-            let mut value = cached.clone();
-            strip_text_edits(&mut value);
-            tracing::debug!("completion: stale cache for {language}");
-            return Ok(serde_json::from_value(value).ok().flatten());
-        }
-
-        // No cache yet (first request for this language), wait for the fresh result.
+        // Wait for the fresh result. The background task survives $/cancelRequest so
+        // it will always update the cache even if we are cancelled here. Slow LSPs
+        // (e.g. Julia) will hit the Neovim timeout on the first request, but
+        // subsequent requests benefit from the warmed cache via the fallback below.
         if let Ok(result) = fresh_rx.await {
             tracing::debug!("completion: fresh result for {language}");
+
             return Ok(serde_json::from_value(result).ok().flatten());
         }
 
+        // fresh_tx was dropped without sending (delegate error or no result).
+        // Fall back to the last known good cache for this language if available.
+        if let Some(cached) = self.completion_cache.get(&language) {
+            let mut value = cached.clone();
+            strip_text_edits(&mut value);
+
+            tracing::debug!("completion: fallback cache for {language}");
+
+            return Ok(serde_json::from_value(value).ok().flatten());
+        }
+
         tracing::debug!("completion: no result for {language}");
+
         Ok(None)
     }
 }
