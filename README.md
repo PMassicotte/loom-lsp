@@ -10,6 +10,10 @@
 
 Write [Quarto](https://quarto.org/) documents and get IDE support for different languages in your notebook at the same time.
 
+## Demo
+
+![loom-lsp demo](assets/demo.gif)
+
 ## The problem
 
 Quarto `.qmd` files can include different code chunks (Python, R, markdown, ...) all in one document. The issue is that the editor only understands one language at a time, in the case of a Quarto document, it usually defaults to markdown. This means no autocomplete, no diagnostics, no hover documentation, and no go-to-definition for your preferred language.
