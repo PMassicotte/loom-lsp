@@ -148,6 +148,11 @@ This is the current status of LSP features in loom-lsp. All core features are su
 | Formatting           | 🚧     |
 | Workspace symbols    | 🚧     |
 
+## Similar projects
+
+- 🦦 [otter.nvim](https://github.com/jmbuhr/otter.nvim)
+  - Neovim-specific plugin written in pure Lua with deep integration into Neovim's native LSP client and treesitter.
+
 ## Contributing
 
 Bug reports and feedback are welcome. Please [open an issue](https://github.com/PMassicotte/loom-lsp/issues).
