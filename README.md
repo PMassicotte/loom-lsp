@@ -37,18 +37,14 @@ loom-lsp looks for configuration files in the following order, with later entrie
 1. `~/.config/loom-lsp/loom.toml` is the global settings and language configurations
 2. `.loom.toml` in the current project directory and overrides global settings for that project
 
-### Server options
-
-```toml
-[server]
-log_level = "info"  # or one of: trace | debug | info | warn | error
-```
-
 ### Language configuration
 
 For each language, specify the command to start the LSP server and, optionally, root markers to identify the project root. Here is an example configuration:
 
 ```toml
+[server]
+log_level = "info"  # or one of: trace | debug | info | warn | error
+
 [languages.python]
 server_command = ["pyright-langserver", "--stdio"]
 root_markers = ["pyproject.toml", "setup.py"]
