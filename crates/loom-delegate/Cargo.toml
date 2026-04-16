@@ -1,11 +1,11 @@
 [package]
 name = "loom-delegate"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-lsp-types = "0.94.1"
+lsp-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
