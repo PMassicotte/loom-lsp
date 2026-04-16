@@ -3,13 +3,12 @@ name = "loom-lsp"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "loom-lsp"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.0", default-features = false, features = [
+  "derive",
+  "std"
+] }
 dashmap = "7.0.0-rc2"
 futures = "0.3.32"
 loom-config = { path = "../loom-config" }
@@ -21,4 +20,7 @@ serde_json.workspace = true
 tokio.workspace = true
 tower-lsp.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+  "env-filter",
+  "fmt"
+] }

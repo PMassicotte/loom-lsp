@@ -27,7 +27,7 @@ loom-lsp is a language server that sits between your editor and your existing la
 loom-lsp is not yet published to crates.io, but you can install it directly from GitHub using Cargo. You will need the [Rust toolchain](https://rustup.rs/) installed.
 
 ```bash
-cargo install --git https://github.com/pmassicotte/loom-lsp --branch main loom-lsp
+cargo install --git https://github.com/pmassicotte/loom-lsp --branch main loom-lsp --locked
 ```
 
 ## Configuration
