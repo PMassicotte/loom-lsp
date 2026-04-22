@@ -91,6 +91,11 @@ vim.lsp.config("loom-lsp", {
 vim.lsp.enable("loom-lsp")
 ```
 
+### Supported flags
+
+- `--stdio`: communicate with the editor using standard input/output.
+- `--config <path>`: specify a custom path to the configuration file (for a non-standard location).
+
 ## Architecture
 
 When your editor sends a request (completion, hover, diagnostics, etc.), loom-lsp parses the `.qmd` file into per-language virtual documents, line-padded so that line numbers stay in sync with the original file. Each language gets its own delegate process running the real language server, spawned lazily on first use. loom-lsp forwards the request to the right delegate, rewrites any URIs in the response back to the host document, and returns the result to the editor. The editor never knows there are multiple language servers involved.
