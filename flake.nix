@@ -36,7 +36,12 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        crateInfo = craneLib.crateNameFromCargoToml { cargoToml = ./crates/loom/Cargo.toml; };
+        workspaceToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+        crateToml = builtins.fromTOML (builtins.readFile ./crates/loom/Cargo.toml);
+        crateInfo = {
+          pname = crateToml.package.name;
+          version = workspaceToml.workspace.package.version;
+        };
 
         commonArgs = {
           src = ./.;
