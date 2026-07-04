@@ -24,6 +24,29 @@ loom-lsp is a language server that sits between your editor and your existing la
 
 ## Installation
 
+### From pre-built binaries
+
+Pre-built binaries are available for the following platforms on the [Releases page](https://github.com/PMassicotte/loom-lsp/releases):
+
+| Platform          | Target triple               |
+| ----------------- | --------------------------- |
+| macOS (ARM)       | `aarch64-apple-darwin`      |
+| macOS (Intel)     | `x86_64-apple-darwin`       |
+| Linux (x86\_64)   | `x86_64-unknown-linux-gnu`  |
+| Linux (ARM64)     | `aarch64-unknown-linux-gnu` |
+| Windows (x86\_64) | `x86_64-pc-windows-msvc`    |
+
+Download the archive for your platform, extract it, and place the `loom-lsp` binary somewhere on your `PATH`:
+
+```bash
+# Example for Linux x86_64 — adjust the filename for your platform
+curl -LO https://github.com/PMassicotte/loom-lsp/releases/latest/download/loom-lsp-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf loom-lsp-x86_64-unknown-linux-gnu.tar.gz
+mv loom-lsp ~/.local/bin/
+```
+
+### From GitHub
+
 loom-lsp is not yet published to crates.io, but you can install it directly from GitHub using Cargo. You will need the [Rust toolchain](https://rustup.rs/) installed.
 
 ```bash
@@ -81,7 +104,13 @@ server_command = ["typescript-language-server", "--stdio"]
 server_command = ["yaml-language-server", "--stdio"]
 ```
 
-`server_command` is required. `root_markers` is optional. When provided, loom-lsp uses these files to locate the project root for that language.
+Each `[languages.<name>]` section supports:
+
+| Key              | Required | Description                                                                             |
+| ---------------- | -------- | --------------------------------------------------------------------------------------- |
+| `server_command` | Yes      | Command and arguments to launch the language server                                     |
+| `root_markers`   | No       | Files or directories used to locate the project root for this language                  |
+| `settings`       | No       | Arbitrary TOML value forwarded as `initializationOptions` in the LSP initialize request |
 
 ## Editor Support
 
