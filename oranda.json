@@ -4,6 +4,11 @@
     "description": "Multi-language LSP support for Quarto documents",
     "repository": "https://github.com/PMassicotte/loom-lsp"
   },
+  "components": {
+    "artifacts": {
+      "cargo_dist": true
+    }
+  },
   "build": {
     "path_prefix": "loom-lsp"
   }
