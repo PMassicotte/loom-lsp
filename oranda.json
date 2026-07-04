@@ -1,4 +1,9 @@
 {
+  "project": {
+    "name": "loom-lsp",
+    "description": "Multi-language LSP support for Quarto documents",
+    "repository": "https://github.com/PMassicotte/loom-lsp"
+  },
   "build": {
     "path_prefix": "loom-lsp"
   }
