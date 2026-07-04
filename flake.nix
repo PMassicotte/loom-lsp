@@ -84,6 +84,7 @@
             pkgs.cargo-insta
             pkgs.pyright
             pkgs.cargo-dist
+            pkgs.oranda
           ];
         };
       }
