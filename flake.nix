@@ -83,6 +83,7 @@
             rustToolchain
             pkgs.cargo-insta
             pkgs.pyright
+            pkgs.cargo-dist
           ];
         };
       }

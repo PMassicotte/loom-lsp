@@ -5,6 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/PMassicotte/loom-lsp/"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
@@ -13,22 +14,25 @@ lsp-types = "0.94.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
-tokio = { version = "1.51.0", features = [
-  "io-std",
-  "io-util",
-  "macros",
-  "process",
-  "rt-multi-thread"
-] }
+tokio = {
+  version = "1.51.0",
+  features = ["io-std", "io-util", "macros", "process", "rt-multi-thread"]
+}
 tower-lsp = "0.20.0"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", default-features = false, features = [
-  "env-filter",
-  "fmt"
-] }
+tracing-subscriber = {
+  version = "0.3.23",
+  default-features = false,
+  features = ["env-filter", "fmt"]
+}
 
 [profile.release]
 strip = "symbols"
 lto = "fat"
 panic = "abort"
 codegen-units = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
